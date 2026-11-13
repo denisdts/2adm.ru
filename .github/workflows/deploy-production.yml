@@ -30,8 +30,8 @@ jobs:
         run: |
           set -euo pipefail
           install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
-          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/2adm_deploy"
+          chmod 600 "$HOME/.ssh/2adm_deploy"
 
           if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
             printf '%s\n' "$SSH_KNOWN_HOSTS" >> "$HOME/.ssh/known_hosts"
@@ -42,11 +42,11 @@ jobs:
       - name: Validate deploy key
         run: |
           set -euo pipefail
-          if ! ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null 2>&1; then
+          if ! ssh-keygen -y -f "$HOME/.ssh/2adm_deploy" > /dev/null 2>&1; then
             echo "SSH_PRIVATE_KEY не читается. Нужен приватный ключ без пароля в формате OpenSSH." >&2
             exit 1
           fi
-          ssh-keygen -l -f "$HOME/.ssh/deploy_key"
+          ssh-keygen -l -f "$HOME/.ssh/2adm_deploy"
 
       - name: Upload project
         env:
@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           port="${SSH_PORT:-22}"
-          ssh -i "$HOME/.ssh/deploy_key" -p "$port" -o BatchMode=yes \
+          ssh -i "$HOME/.ssh/2adm_deploy" -p "$port" -o BatchMode=yes \
             -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
             "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH'"
 
@@ -67,7 +67,7 @@ jobs:
             --exclude '.env' \
             --exclude 'www/vendor' \
             --exclude 'www/var' \
-            -e "ssh -i $HOME/.ssh/deploy_key -p $port -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey" \
+            -e "ssh -i $HOME/.ssh/2adm_deploy -p $port -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey" \
             ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 
       - name: Build and restart
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           port="${SSH_PORT:-22}"
-          ssh -i "$HOME/.ssh/deploy_key" -p "$port" -o BatchMode=yes \
+          ssh -i "$HOME/.ssh/2adm_deploy" -p "$port" -o BatchMode=yes \
             -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
             "$SSH_USER@$SSH_HOST" \
             "cd '$DEPLOY_PATH' && docker compose -f docker-compose.yml -f docker-compose.embedded.yml -f docker-compose.prod.yml build && docker compose -f docker-compose.yml -f docker-compose.embedded.yml -f docker-compose.prod.yml up -d --remove-orphans && docker image prune -f"
