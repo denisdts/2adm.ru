@@ -138,6 +138,191 @@ docker compose ... exec app php bin/console.php health
 docker compose ... logs -f app
 ```
 
+## Деплой в продакшен (GitHub Actions)
+
+Схема: push в ветку `production` → GitHub Actions → SSH на сервер → обновление кода до `origin/production` → сборка образа → `docker compose up -d` → ожидание healthcheck.
+
+Workflow: `.github/workflows/deploy-production.yml`.
+
+### 1. Что сделать на сервере
+
+> Ветку `production` создайте заранее (см. п. 2.3) — она понадобится для клонирования и деплоя.
+
+**1.1. Установить Docker и Compose v2** (Ubuntu/Debian):
+
+```sh
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo docker compose version
+```
+
+Для сборки PHP-расширений серверу желательно иметь **не менее 2 ГБ RAM** (или swap).
+
+**1.2. Создать пользователя для деплоя** и выдать ему Docker:
+
+```sh
+sudo adduser --disabled-password --gecos "" deploy
+sudo usermod -aG docker deploy
+sudo mkdir -p /opt/monitoring
+sudo chown deploy:deploy /opt/monitoring
+```
+
+**1.3. Добавить SSH-ключ GitHub Actions на сервер.** Ключ создаётся на рабочей машине:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/2adm_deploy -C "github-actions-2adm" -N ""
+ssh root@SERVER_IP "install -d -m 700 -o deploy -g deploy /home/deploy/.ssh && cat >> /home/deploy/.ssh/authorized_keys && chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/.ssh/authorized_keys" < ~/.ssh/2adm_deploy.pub
+```
+
+Приватный ключ `~/.ssh/2adm_deploy` целиком пойдёт в GitHub Secret (шаг 2.1). Публичный — уже добавлен в `authorized_keys`.
+
+**1.4. Склонировать репозиторий** (репозиторий публичный, HTTPS достаточно):
+
+```sh
+sudo -u deploy git clone https://github.com/denisdts/2adm.ru.git /opt/monitoring/2adm.ru
+sudo -u deploy git -C /opt/monitoring/2adm.ru checkout production
+```
+
+Если репозиторий станет приватным — создайте на сервере deploy key и добавьте его в GitHub: **Settings → Deploy keys → Add deploy key** (read-only).
+
+**1.5. Создать `.env`** (файл не в Git и сохраняется между деплоями):
+
+```sh
+cd /opt/monitoring/2adm.ru
+sudo -u deploy cp .env.example .env
+sudo -u deploy nano .env
+```
+
+Минимум для продакшена:
+
+```dotenv
+APP_ENV=production
+APP_DEBUG=false
+APP_KEY=<openssl rand -hex 32>
+APP_PORT=7060
+# 127.0.0.1 — если прокси стоит на этом же сервере,
+# 0.0.0.0 — если прокси внешний (ограничьте порт firewall'ом)
+APP_BIND=127.0.0.1
+
+DB_HOST=mysql.example.com
+DB_PORT=3306
+DB_DATABASE=monitoring
+DB_USERNAME=monitoring
+DB_PASSWORD=<пароль>
+
+CLICKHOUSE_HOST=clickhouse
+CLICKHOUSE_PASSWORD=<пароль>
+REDIS_HOST=redis
+REDIS_PASSWORD=<пароль или пусто>
+
+MIGRATE_ON_START=true
+AUTO_COMPOSER_INSTALL=false
+```
+
+`APP_KEY` обязателен: с пустым или дефолтным значением контейнер в продакшене не стартует. Смена `APP_KEY` инвалидирует все API-ключи.
+
+**1.6. Подготовить внешний MySQL:**
+
+- создать базу `monitoring` и пользователя;
+- разрешить подключение с IP сервера;
+- таблицы создаст приложение при старте (`MIGRATE_ON_START=true`). Если схемой управляете отдельно — поставьте `false`.
+
+**1.7. Настроить сеть и прокси:**
+
+- наружу публикуется только `APP_PORT` (7060);
+- ClickHouse и Redis портов не публикуют и доступны только внутри Docker-сети;
+- прокси должен ходить на `127.0.0.1:7060` (если он на этом же сервере);
+- firewall: SSH + 7060 только с адреса прокси. GitHub-hosted runner подключается по SSH с динамических IP — либо разрешите SSH для GitHub Actions IP ranges, либо используйте self-hosted runner.
+
+**1.8. Первый запуск вручную** (проверить, что всё поднимается):
+
+```sh
+cd /opt/monitoring/2adm.ru
+sudo -u deploy docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.embedded.yml \
+  -f docker-compose.prod.yml \
+  up -d --build
+sudo -u deploy docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.embedded.yml \
+  -f docker-compose.prod.yml \
+  ps
+curl -fsS http://127.0.0.1:7060/healthz
+```
+
+**1.9. Создать сервис и API-ключ:**
+
+```sh
+sudo -u deploy docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.embedded.yml \
+  -f docker-compose.prod.yml \
+  exec app php bin/console.php service:create api "API"
+
+sudo -u deploy docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.embedded.yml \
+  -f docker-compose.prod.yml \
+  exec app php bin/console.php api-key:create "Agent" --service=api
+```
+
+### 2. Что добавить в GitHub
+
+**2.1. Variables и Secrets** — репозиторий → **Settings → Secrets and variables → Actions**:
+
+| Тип | Имя | Значение |
+| --- | --- | --- |
+| Variable | `PRODUCTION_SERVER` | IP или домен сервера |
+| Variable | `PRODUCTION_USER` | `deploy` |
+| Variable | `PRODUCTION_PORT` | SSH-порт (обычно `22`) |
+| Variable | `PRODUCTION_PATH` | `/opt/monitoring/2adm.ru` (необязательно, это дефолт) |
+| Secret | `PRODUCTION_SSH_KEY` | содержимое `~/.ssh/2adm_deploy` (приватный ключ) |
+
+**2.2. Environment `production`** (опционально, но рекомендуется) — **Settings → Environments → New environment → production**. Там можно включить required reviewers, запретить деплой без подтверждения и хранить переменные/секреты на уровне окружения. Workflow уже использует `environment: production`.
+
+**2.3. Ветка `production`.** Workflow срабатывает на push в неё. Создайте ветку после того, как добавлены секреты:
+
+```sh
+git checkout main
+git pull
+git checkout -b production
+git push -u origin production
+```
+
+Дальнейшие деплои — обычный push:
+
+```sh
+git checkout production
+git merge main
+git push origin production
+```
+
+**2.4. Защита ветки** (опционально) — **Settings → Branches → Add branch protection rule** для `production`: запретить force-push, требовать PR/review.
+
+Ручной запуск: **Actions → Deploy production → Run workflow**.
+
+### 3. Что делает workflow
+
+1. Подключается по SSH с секретным ключом.
+2. Переходит в `PRODUCTION_PATH`, делает `git fetch` и жёстко переключается на `origin/production` (`.env` при этом не затрагивается — он не в Git).
+3. Собирает образ `app` (`docker compose build --pull app`). Если сборка упала — работающие контейнеры не перезапускаются.
+4. Поднимает стек (`up -d --remove-orphans`) и ждёт статус `healthy` у контейнера `monitoring-app` (до 150 секунд).
+5. При неуспехе печатает последние логи и завершает job с ошибкой.
+
+### 4. Если деплой не прошёл
+
+- `Permission denied (publickey)` — не совпадает приватный ключ в `PRODUCTION_SSH_KEY` с `authorized_keys` на сервере или неверные `PRODUCTION_USER` / `PRODUCTION_PORT`.
+- `permission denied while trying to connect to the Docker daemon` — пользователь `deploy` не в группе `docker`; перезайдите по SSH после `usermod`.
+- `app did not become healthy` — смотрите логи в job: внешний MySQL недоступен, неверный `DB_*`, не задан `APP_KEY`, занят порт 7060.
+- `git fetch` не работает — нет доступа к репозиторию с сервера (deploy key или приватность).
+
 ## Переменные окружения
 
 Основные (`см. .env.example`):

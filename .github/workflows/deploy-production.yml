@@ -1,0 +1,63 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - production
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to production server
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        with:
+          host: ${{ vars.PRODUCTION_SERVER }}
+          username: ${{ vars.PRODUCTION_USER }}
+          port: ${{ vars.PRODUCTION_PORT }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          command_timeout: 30m
+          script_stop: true
+          envs: GITHUB_SHA
+          script: |
+            set -euo pipefail
+
+            cd "${{ vars.PRODUCTION_PATH || '/opt/monitoring/2adm.ru' }}"
+            echo "Deploying commit $GITHUB_SHA"
+
+            git fetch origin production
+            git checkout -B production origin/production
+            git reset --hard origin/production
+
+            COMPOSE="docker compose -f docker-compose.yml -f docker-compose.embedded.yml -f docker-compose.prod.yml"
+
+            # Build first: if the build fails, the running containers stay untouched.
+            $COMPOSE build --pull app
+            $COMPOSE up -d --remove-orphans
+
+            # Wait for the container healthcheck (/healthz) before reporting success.
+            for i in $(seq 1 30); do
+              status="$(docker inspect -f '{{.State.Health.Status}}' monitoring-app 2>/dev/null || true)"
+              if [ "$status" = "healthy" ]; then
+                echo "app is healthy"
+                docker image prune -f >/dev/null 2>&1 || true
+                exit 0
+              fi
+              sleep 5
+            done
+
+            echo "app did not become healthy within 150s"
+            $COMPOSE logs --tail=150 app
+            exit 1
