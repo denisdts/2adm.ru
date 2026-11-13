@@ -1,0 +1,74 @@
+# -----------------------------------------------------------------------------
+# Base stack: the application container.
+#
+#   local : docker compose -f docker-compose.yml -f docker-compose.embedded.yml \
+#                          -f docker-compose.local.yml up -d --build
+#   prod  : docker compose -f docker-compose.yml -f docker-compose.embedded.yml \
+#                          -f docker-compose.prod.yml up -d --build
+#
+# ClickHouse and Redis currently come from docker-compose.embedded.yml. When
+# they move to dedicated servers, drop that file and set CLICKHOUSE_HOST /
+# REDIS_HOST in .env instead.
+#
+# The service listens on ${APP_PORT} (7060) and is meant to sit behind a proxy.
+# -----------------------------------------------------------------------------
+name: monitoring
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      args:
+        PHP_IMAGE: ${PHP_IMAGE:-php:8.5-fpm-alpine}
+    image: ${APP_IMAGE:-monitoring/app:local}
+    container_name: monitoring-app
+    restart: unless-stopped
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-7060}:${APP_PORT:-7060}"
+    environment:
+      APP_NAME: ${APP_NAME:-Monitoring}
+      APP_ENV: ${APP_ENV:-local}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      APP_KEY: ${APP_KEY:-dev-only-change-me}
+      APP_PORT: ${APP_PORT:-7060}
+      APP_TRUSTED_PROXIES: ${APP_TRUSTED_PROXIES:-}
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-256M}
+      PHP_MAX_EXECUTION_TIME: ${PHP_MAX_EXECUTION_TIME:-60}
+      PHP_OPCACHE_VALIDATE_TIMESTAMPS: ${PHP_OPCACHE_VALIDATE_TIMESTAMPS:-1}
+      DB_HOST: ${DB_HOST:-mysql}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_DATABASE: ${DB_DATABASE:-monitoring}
+      DB_USERNAME: ${DB_USERNAME:-monitoring}
+      DB_PASSWORD: ${DB_PASSWORD:-monitoring}
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:-clickhouse}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-8123}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-monitoring}
+      CLICKHOUSE_USERNAME: ${CLICKHOUSE_USERNAME:-monitoring}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD-monitoring}
+      CLICKHOUSE_TIMEOUT: ${CLICKHOUSE_TIMEOUT:-15}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      REDIS_PREFIX: ${REDIS_PREFIX:-mon:}
+      API_KEY_HEADER: ${API_KEY_HEADER:-X-Api-Key}
+      API_REQUIRE_READ_AUTH: ${API_REQUIRE_READ_AUTH:-false}
+      API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-600}
+      METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-90}
+      METRICS_DEFAULT_WINDOW: ${METRICS_DEFAULT_WINDOW:-3600}
+      MIGRATE_ON_START: ${MIGRATE_ON_START:-false}
+      AUTO_COMPOSER_INSTALL: ${AUTO_COMPOSER_INSTALL:-false}
+      WAIT_FOR_SERVICES: ${WAIT_FOR_SERVICES:-true}
+      WAIT_TIMEOUT: ${WAIT_TIMEOUT:-60}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS \"http://127.0.0.1:$${APP_PORT:-7060}/healthz\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

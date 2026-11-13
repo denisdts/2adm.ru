@@ -1,0 +1,63 @@
+# -----------------------------------------------------------------------------
+# Production stack: the application container plus (for now) the embedded
+# ClickHouse/Redis containers from docker-compose.embedded.yml.
+#
+# MySQL is always external. ClickHouse and Redis default to the embedded
+# services; once they live on dedicated servers, remove the embedded file from
+# the command line and set CLICKHOUSE_HOST / REDIS_HOST.
+#
+#   embedded: docker compose -f docker-compose.yml -f docker-compose.embedded.yml \
+#                             -f docker-compose.prod.yml up -d --build
+#   external: docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#                             up -d --build   # with all hosts in .env
+# -----------------------------------------------------------------------------
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+      args:
+        PHP_IMAGE: ${PHP_IMAGE:-php:8.5-fpm-alpine}
+    image: ${APP_IMAGE:-monitoring/app:prod}
+    restart: always
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: "${APP_KEY:?APP_KEY must be set in production (openssl rand -hex 32)}"
+      APP_TRUSTED_PROXIES: ${APP_TRUSTED_PROXIES:-127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+      PHP_OPCACHE_VALIDATE_TIMESTAMPS: "0"
+      # --- external MySQL ---
+      DB_HOST: "${DB_HOST:?DB_HOST must point to the external MySQL server}"
+      DB_PORT: ${DB_PORT:-3306}
+      DB_DATABASE: ${DB_DATABASE:-monitoring}
+      DB_USERNAME: ${DB_USERNAME:-monitoring}
+      DB_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be set in production}"
+      # --- ClickHouse (embedded by default, external via CLICKHOUSE_HOST) ---
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:-clickhouse}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-8123}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-monitoring}
+      CLICKHOUSE_USERNAME: ${CLICKHOUSE_USERNAME:-monitoring}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD-monitoring}
+      # --- Redis (embedded by default, external via REDIS_HOST) ---
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      REDIS_PREFIX: ${REDIS_PREFIX:-mon:}
+      # code is baked into the image, dependencies are installed at build time
+      AUTO_COMPOSER_INSTALL: "false"
+      MIGRATE_ON_START: ${MIGRATE_ON_START:-true}
+      WAIT_FOR_SERVICES: "true"
+      WAIT_TIMEOUT: ${WAIT_TIMEOUT:-60}
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

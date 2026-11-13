@@ -1,0 +1,49 @@
+server {
+    listen ${APP_PORT} default_server;
+    listen [::]:${APP_PORT} default_server;
+    server_name _;
+
+    root ${WWW_DIR}/public;
+    index index.php;
+    charset utf-8;
+
+    access_log /dev/stdout;
+    error_log /dev/stderr warn;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # dashboard / static assets
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location = /favicon.ico {
+        access_log off;
+        log_not_found off;
+    }
+
+    location = /robots.txt {
+        access_log off;
+        log_not_found off;
+    }
+
+    # front controller
+    location ~ \.php$ {
+        try_files $uri =404;
+        include fastcgi_params;
+        fastcgi_pass 127.0.0.1:9000;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $document_root;
+        fastcgi_read_timeout 60s;
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+    }
+
+    # never expose dotfiles (.env, .git, ...)
+    location ~ /\. {
+        deny all;
+    }
+}

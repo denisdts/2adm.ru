@@ -1,0 +1,20 @@
+# --- local env ---
+.env
+.env.local
+*.env.bak
+
+# --- php ---
+www/vendor/
+www/var/
+www/.phpunit.cache/
+www/.php-cs-fixer.cache
+
+# --- runtime / logs ---
+*.log
+docker/*.log
+
+# --- editors / os ---
+.idea/
+.vscode/
+.DS_Store
+*.swp

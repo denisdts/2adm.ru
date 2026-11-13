@@ -1,0 +1,22 @@
+# --- vcs / local env ---------------------------------------------------------
+.git
+.gitignore
+.env
+.env.*
+*.env.bak
+
+# --- dependencies and runtime data ------------------------------------------
+www/vendor
+www/var
+www/.phpunit.cache
+www/.php-cs-fixer.cache
+**/*.log
+
+# --- editors / os -----------------------------------------------------------
+.idea
+.vscode
+.DS_Store
+*.swp
+
+# --- compose ----------------------------------------------------------------
+docker-compose*.yml
