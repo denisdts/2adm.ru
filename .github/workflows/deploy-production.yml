@@ -27,14 +27,14 @@ jobs:
           host: ${{ vars.PRODUCTION_SERVER }}
           username: ${{ vars.PRODUCTION_USER }}
           port: ${{ vars.PRODUCTION_PORT }}
-          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          key: ${{ secrets.RUNNER_KEY }}
           command_timeout: 30m
           script_stop: true
           envs: GITHUB_SHA
           script: |
             set -euo pipefail
 
-            cd "${{ vars.PRODUCTION_PATH || '/opt/monitoring/2adm.ru' }}"
+            cd "${{ vars.PRODUCTION_PATH || '/data/prod/2adm.ru' }}"
             echo "Deploying commit $GITHUB_SHA"
 
             git fetch origin production

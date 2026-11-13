@@ -144,59 +144,48 @@ docker compose ... logs -f app
 
 Workflow: `.github/workflows/deploy-production.yml`.
 
-### 1. Что сделать на сервере
+Деплой рассчитан на уже настроенную инфраструктуру: на сервере есть пользователь `app`, Docker и другие проекты, которые деплоятся из Git. Создавать нового пользователя и заново устанавливать Docker не нужно.
+
+### 1. Что проверить/сделать на сервере
 
 > Ветку `production` создайте заранее (см. п. 2.3) — она понадобится для клонирования и деплоя.
 
-**1.1. Установить Docker и Compose v2** (Ubuntu/Debian):
+**1.1. Проверить Docker и Compose у пользователя `app`:**
 
 ```sh
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl git
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo docker compose version
+sudo -u app docker compose version
+sudo -u app docker ps
 ```
 
-Для сборки PHP-расширений серверу желательно иметь **не менее 2 ГБ RAM** (или swap).
+Если используется старый `docker-compose` v1, доустановите плагин `docker-compose-plugin`. Для сборки PHP-расширений желательно **не менее 2 ГБ RAM** (или swap).
 
-**1.2. Создать пользователя для деплоя** и выдать ему Docker:
-
-```sh
-sudo adduser --disabled-password --gecos "" deploy
-sudo usermod -aG docker deploy
-sudo mkdir -p /opt/monitoring
-sudo chown deploy:deploy /opt/monitoring
-```
-
-**1.3. Добавить SSH-ключ GitHub Actions на сервер.** Ключ создаётся на рабочей машине:
+**1.2. Проверить SSH-доступ для GitHub Actions.** Если другие проекты уже деплоятся под `app` с тем же ключом, ничего добавлять не нужно — workflow использует тот же секрет `RUNNER_KEY`. Если для этого проекта нужен отдельный ключ:
 
 ```sh
+# на рабочей машине
 ssh-keygen -t ed25519 -f ~/.ssh/2adm_deploy -C "github-actions-2adm" -N ""
-ssh root@SERVER_IP "install -d -m 700 -o deploy -g deploy /home/deploy/.ssh && cat >> /home/deploy/.ssh/authorized_keys && chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/.ssh/authorized_keys" < ~/.ssh/2adm_deploy.pub
+ssh app@SERVER_IP "install -d -m 700 /home/app/.ssh && cat >> /home/app/.ssh/authorized_keys && chmod 600 /home/app/.ssh/authorized_keys" < ~/.ssh/2adm_deploy.pub
 ```
 
-Приватный ключ `~/.ssh/2adm_deploy` целиком пойдёт в GitHub Secret (шаг 2.1). Публичный — уже добавлен в `authorized_keys`.
+Приватный ключ целиком добавляется в GitHub Secret `RUNNER_KEY` (п. 2.1).
 
-**1.4. Склонировать репозиторий** (репозиторий публичный, HTTPS достаточно):
+**1.3. Склонировать репозиторий в существующий каталог проектов:**
 
 ```sh
-sudo -u deploy git clone https://github.com/denisdts/2adm.ru.git /opt/monitoring/2adm.ru
-sudo -u deploy git -C /opt/monitoring/2adm.ru checkout production
+sudo -u app git clone https://github.com/denisdts/2adm.ru.git /data/prod/2adm.ru
+sudo -u app git -C /data/prod/2adm.ru checkout production
 ```
 
-Если репозиторий станет приватным — создайте на сервере deploy key и добавьте его в GitHub: **Settings → Deploy keys → Add deploy key** (read-only).
+`/data/prod` уже используется другими проектами и должен быть доступен на запись пользователю `app`. Если каталог другой — задайте его в `PRODUCTION_PATH` (п. 2.1).
 
-**1.5. Создать `.env`** (файл не в Git и сохраняется между деплоями):
+Если репозиторий станет приватным — добавьте на сервере deploy key для `app` и внесите его в GitHub: **Settings → Deploy keys → Add deploy key** (read-only).
+
+**1.4. Создать `.env`** (файл не в Git и сохраняется между деплоями):
 
 ```sh
-cd /opt/monitoring/2adm.ru
-sudo -u deploy cp .env.example .env
-sudo -u deploy nano .env
+cd /data/prod/2adm.ru
+sudo -u app cp .env.example .env
+sudo -u app nano .env
 ```
 
 Минимум для продакшена:
@@ -227,46 +216,48 @@ AUTO_COMPOSER_INSTALL=false
 
 `APP_KEY` обязателен: с пустым или дефолтным значением контейнер в продакшене не стартует. Смена `APP_KEY` инвалидирует все API-ключи.
 
-**1.6. Подготовить внешний MySQL:**
+**1.5. Подготовить внешний MySQL:**
 
-- создать базу `monitoring` и пользователя;
-- разрешить подключение с IP сервера;
+- создать отдельную базу `monitoring` и пользователя (не переиспользуйте базу другого проекта);
+- разрешить подключение с IP этого сервера;
 - таблицы создаст приложение при старте (`MIGRATE_ON_START=true`). Если схемой управляете отдельно — поставьте `false`.
 
-**1.7. Настроить сеть и прокси:**
+**1.6. Настроить сеть и прокси:**
 
-- наружу публикуется только `APP_PORT` (7060);
+- наружу публикуется только `APP_PORT` (7060); проверьте, что порт не занят другим проектом: `ss -ltnp | grep 7060`;
 - ClickHouse и Redis портов не публикуют и доступны только внутри Docker-сети;
-- прокси должен ходить на `127.0.0.1:7060` (если он на этом же сервере);
-- firewall: SSH + 7060 только с адреса прокси. GitHub-hosted runner подключается по SSH с динамических IP — либо разрешите SSH для GitHub Actions IP ranges, либо используйте self-hosted runner.
+- если на сервере уже есть общий nginx/прокси, добавьте upstream на `127.0.0.1:7060`;
+- firewall: SSH + 7060 только с адреса прокси. GitHub-hosted runner подключается по SSH с динамических IP — либо разрешите SSH для GitHub Actions IP ranges, либо используйте self-hosted runner (как в других проектах).
 
-**1.8. Первый запуск вручную** (проверить, что всё поднимается):
+**1.7. Первый запуск вручную** (проверить, что всё поднимается):
 
 ```sh
-cd /opt/monitoring/2adm.ru
-sudo -u deploy docker compose \
+cd /data/prod/2adm.ru
+sudo -u app docker compose \
   -f docker-compose.yml \
   -f docker-compose.embedded.yml \
   -f docker-compose.prod.yml \
   up -d --build
-sudo -u deploy docker compose \
+
+sudo -u app docker compose \
   -f docker-compose.yml \
   -f docker-compose.embedded.yml \
   -f docker-compose.prod.yml \
   ps
+
 curl -fsS http://127.0.0.1:7060/healthz
 ```
 
-**1.9. Создать сервис и API-ключ:**
+**1.8. Создать сервис и API-ключ:**
 
 ```sh
-sudo -u deploy docker compose \
+sudo -u app docker compose \
   -f docker-compose.yml \
   -f docker-compose.embedded.yml \
   -f docker-compose.prod.yml \
   exec app php bin/console.php service:create api "API"
 
-sudo -u deploy docker compose \
+sudo -u app docker compose \
   -f docker-compose.yml \
   -f docker-compose.embedded.yml \
   -f docker-compose.prod.yml \
@@ -275,15 +266,19 @@ sudo -u deploy docker compose \
 
 ### 2. Что добавить в GitHub
 
-**2.1. Variables и Secrets** — репозиторий → **Settings → Secrets and variables → Actions**:
+**2.1. Variables и Secrets** — репозиторий → **Settings → Secrets and variables → Actions**.
+
+Используются те же имена, что и в остальных деплой-workflow проекта, поэтому можно переиспользовать существующие значения:
 
 | Тип | Имя | Значение |
 | --- | --- | --- |
 | Variable | `PRODUCTION_SERVER` | IP или домен сервера |
-| Variable | `PRODUCTION_USER` | `deploy` |
+| Variable | `PRODUCTION_USER` | `app` |
 | Variable | `PRODUCTION_PORT` | SSH-порт (обычно `22`) |
-| Variable | `PRODUCTION_PATH` | `/opt/monitoring/2adm.ru` (необязательно, это дефолт) |
-| Secret | `PRODUCTION_SSH_KEY` | содержимое `~/.ssh/2adm_deploy` (приватный ключ) |
+| Variable | `PRODUCTION_PATH` | `/data/prod/2adm.ru` (необязательно, это дефолт) |
+| Secret | `RUNNER_KEY` | приватный SSH-ключ, который уже используется для деплоя под `app` |
+
+Если эти переменные/секрет уже заданы на уровне организации или environment — в репозитории их дублировать не нужно, workflow их унаследует. Иначе добавьте на уровне репозитория или environment `production`.
 
 **2.2. Environment `production`** (опционально, но рекомендуется) — **Settings → Environments → New environment → production**. Там можно включить required reviewers, запретить деплой без подтверждения и хранить переменные/секреты на уровне окружения. Workflow уже использует `environment: production`.
 
@@ -310,18 +305,19 @@ git push origin production
 
 ### 3. Что делает workflow
 
-1. Подключается по SSH с секретным ключом.
-2. Переходит в `PRODUCTION_PATH`, делает `git fetch` и жёстко переключается на `origin/production` (`.env` при этом не затрагивается — он не в Git).
+1. Подключается по SSH под пользователем `app` с ключом из `RUNNER_KEY`.
+2. Переходит в `PRODUCTION_PATH` (по умолчанию `/data/prod/2adm.ru`), делает `git fetch` и переключается на `origin/production` (`.env` не затрагивается — он не в Git).
 3. Собирает образ `app` (`docker compose build --pull app`). Если сборка упала — работающие контейнеры не перезапускаются.
 4. Поднимает стек (`up -d --remove-orphans`) и ждёт статус `healthy` у контейнера `monitoring-app` (до 150 секунд).
 5. При неуспехе печатает последние логи и завершает job с ошибкой.
 
 ### 4. Если деплой не прошёл
 
-- `Permission denied (publickey)` — не совпадает приватный ключ в `PRODUCTION_SSH_KEY` с `authorized_keys` на сервере или неверные `PRODUCTION_USER` / `PRODUCTION_PORT`.
-- `permission denied while trying to connect to the Docker daemon` — пользователь `deploy` не в группе `docker`; перезайдите по SSH после `usermod`.
+- `Permission denied (publickey)` — `RUNNER_KEY` не соответствует ключу в `/home/app/.ssh/authorized_keys` или неверные `PRODUCTION_USER` / `PRODUCTION_PORT`.
+- `permission denied while trying to connect to the Docker daemon` — пользователь `app` не в группе `docker`.
+- `cd: no such file or directory` — неверный `PRODUCTION_PATH` или репозиторий не склонирован под `app`.
 - `app did not become healthy` — смотрите логи в job: внешний MySQL недоступен, неверный `DB_*`, не задан `APP_KEY`, занят порт 7060.
-- `git fetch` не работает — нет доступа к репозиторию с сервера (deploy key или приватность).
+- `git fetch` не работает — у `app` нет доступа к репозиторию (deploy key или приватность).
 
 ## Переменные окружения
 
