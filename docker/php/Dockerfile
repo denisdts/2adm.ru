@@ -40,7 +40,6 @@ RUN apk add --no-cache \
         mysqli \
         mbstring \
         intl \
-        opcache \
         zip \
         bcmath \
         pcntl \
