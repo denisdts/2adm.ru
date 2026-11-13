@@ -2,62 +2,84 @@ name: Deploy production
 
 on:
   push:
-    branches:
-      - production
+    branches: [production]
   workflow_dispatch:
-
-concurrency:
-  group: production
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    name: Deploy to production server
     runs-on: ubuntu-latest
-    environment: production
+    timeout-minutes: 20
+
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
         env:
-          GITHUB_SHA: ${{ github.sha }}
-        with:
-          host: ${{ vars.PRODUCTION_SERVER }}
-          username: ${{ vars.PRODUCTION_USER }}
-          port: ${{ vars.PRODUCTION_PORT }}
-          key: ${{ secrets.RUNNER_KEY }}
-          command_timeout: 30m
-          script_stop: true
-          envs: GITHUB_SHA
-          script: |
-            set -euo pipefail
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
 
-            cd "${{ vars.PRODUCTION_PATH || '/data/prod/2adm.ru' }}"
-            echo "Deploying commit $GITHUB_SHA"
+          if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" >> "$HOME/.ssh/known_hosts"
+          else
+            ssh-keyscan -p "${SSH_PORT:-22}" -H "$SSH_HOST" >> "$HOME/.ssh/known_hosts"
+          fi
 
-            git fetch origin production
-            git checkout -B production origin/production
-            git reset --hard origin/production
-
-            COMPOSE="docker compose -f docker-compose.yml -f docker-compose.embedded.yml -f docker-compose.prod.yml"
-
-            # Build first: if the build fails, the running containers stay untouched.
-            $COMPOSE build --pull app
-            $COMPOSE up -d --remove-orphans
-
-            # Wait for the container healthcheck (/healthz) before reporting success.
-            for i in $(seq 1 30); do
-              status="$(docker inspect -f '{{.State.Health.Status}}' monitoring-app 2>/dev/null || true)"
-              if [ "$status" = "healthy" ]; then
-                echo "app is healthy"
-                docker image prune -f >/dev/null 2>&1 || true
-                exit 0
-              fi
-              sleep 5
-            done
-
-            echo "app did not become healthy within 150s"
-            $COMPOSE logs --tail=150 app
+      - name: Validate deploy key
+        run: |
+          set -euo pipefail
+          if ! ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null 2>&1; then
+            echo "SSH_PRIVATE_KEY не читается. Нужен приватный ключ без пароля в формате OpenSSH." >&2
             exit 1
+          fi
+          ssh-keygen -l -f "$HOME/.ssh/deploy_key"
+
+      - name: Upload project
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          port="${SSH_PORT:-22}"
+          ssh -i "$HOME/.ssh/deploy_key" -p "$port" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH'"
+
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.env' \
+            --exclude 'www/vendor' \
+            --exclude 'www/var' \
+            -e "ssh -i $HOME/.ssh/deploy_key -p $port -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey" \
+            ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+      - name: Build and restart
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          port="${SSH_PORT:-22}"
+          ssh -i "$HOME/.ssh/deploy_key" -p "$port" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_PATH' && docker compose -f docker-compose.yml -f docker-compose.embedded.yml -f docker-compose.prod.yml build && docker compose -f docker-compose.yml -f docker-compose.embedded.yml -f docker-compose.prod.yml up -d --remove-orphans && docker image prune -f"
