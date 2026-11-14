@@ -132,6 +132,13 @@ final class AdminPageController
   .form-note { min-height: 20px; margin: 14px 0 0; font-size: 13px; color: var(--muted); }
   .form-note.error { color: var(--danger); }
   .form-note.ok { color: var(--ok); }
+  .code-block {
+    margin: 0; padding: 14px 16px; max-height: 340px; overflow: auto;
+    background: #0f172a; color: #e2e8f0; border-radius: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 
   .table-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -407,7 +414,7 @@ final class AdminPageController
   <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="checkerTitle">
     <button class="modal-close" type="button" data-close-checker aria-label="Закрыть">&times;</button>
     <h2 id="checkerTitle">Добавить чекер</h2>
-    <p class="sub">Название и GUID для запуска на серверах.</p>
+    <p class="sub" id="checkerSub">Название и GUID для запуска на серверах.</p>
     <form id="checkerForm" novalidate>
       <label class="field">
         <span>Название</span>
@@ -420,6 +427,15 @@ final class AdminPageController
       <button class="btn btn-primary" type="submit" id="checkerSubmit">Добавить</button>
       <p class="form-note" id="checkerNote" role="status"></p>
     </form>
+
+    <div id="checkerInstall" hidden>
+      <pre class="code-block" id="checkerInstallCode"></pre>
+      <p class="form-note" id="checkerInstallHint"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" id="checkerInstallCopy">Скопировать</button>
+        <button class="btn btn-primary" type="button" id="checkerInstallDone">Готово</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -443,6 +459,8 @@ final class AdminPageController
   var adminNote = document.getElementById('adminNote');
   var adminSubmit = document.getElementById('adminSubmit');
   var checkerModal = document.getElementById('checkerModal');
+  var checkerTitle = document.getElementById('checkerTitle');
+  var checkerSub = document.getElementById('checkerSub');
   var checkerForm = document.getElementById('checkerForm');
   var checkerNote = document.getElementById('checkerNote');
   var checkerSubmit = document.getElementById('checkerSubmit');
@@ -450,6 +468,11 @@ final class AdminPageController
   var checkerGuidInput = checkerForm.querySelector('input[name="guid"]');
   var checkerInfoModal = document.getElementById('checkerInfoModal');
   var checkerInfoBody = document.getElementById('checkerInfoBody');
+  var checkerInstall = document.getElementById('checkerInstall');
+  var checkerInstallCode = document.getElementById('checkerInstallCode');
+  var checkerInstallHint = document.getElementById('checkerInstallHint');
+  var checkerInstallCopy = document.getElementById('checkerInstallCopy');
+  var checkerInstallDone = document.getElementById('checkerInstallDone');
 
   function readToken() {
     try {
@@ -778,7 +801,71 @@ final class AdminPageController
       hex.slice(16, 20) + '-' + hex.slice(20);
   }
 
+  function checkerInstallScript(checker) {
+    var base = window.location.origin;
+    var guid = checker.guid || '';
+
+    return [
+      '# 1. Скачать и распаковать чекер (linux/amd64)',
+      'curl -fsSL ' + base + '/2adm-checker_linux_amd64.tar.gz -o /tmp/checker.tar.gz',
+      'mkdir -p /tmp/2adm-checker && tar -xzf /tmp/checker.tar.gz -C /tmp/2adm-checker',
+      '',
+      '# 2. Создать конфиг и указать настройки',
+      'sudo install -d -m 0755 /opt/2adm-checker',
+      'sudo install -m 0600 /tmp/2adm-checker/checker.env.example /opt/2adm-checker/checker.env',
+      'sudo nano /opt/2adm-checker/checker.env',
+      '#   MONITOR_BASE_URL=' + base,
+      '#   MONITOR_API_KEY=<глобальный API-ключ>',
+      '#   CHECKER_GUID=' + guid,
+      '',
+      '# 3. Установить и запустить сервис',
+      'cd /tmp/2adm-checker && sudo ./install.sh',
+      '',
+      '# 4. Проверить',
+      'systemctl status 2adm-checker',
+      'journalctl -u 2adm-checker -f'
+    ].join('\n');
+  }
+
+  function showCheckerInstall(checker) {
+    checkerTitle.textContent = 'Чекер создан';
+    checkerSub.textContent = 'Выполните шаги на новом сервере.';
+    checkerForm.hidden = true;
+    checkerInstallCode.textContent = checkerInstallScript(checker);
+    checkerInstallHint.textContent = 'MONITOR_API_KEY — существующий глобальный API-ключ чекера. Если ключа нет, создайте его на сервере приложения.';
+    checkerInstallCopy.textContent = 'Скопировать';
+    checkerInstall.hidden = false;
+  }
+
+  function fallbackCopy(text, onDone) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.append(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+    onDone();
+  }
+
+  function copyText(text, onDone) {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(onDone, function () {
+        fallbackCopy(text, onDone);
+      });
+      return;
+    }
+
+    fallbackCopy(text, onDone);
+  }
+
   function openCheckerModal() {
+    checkerForm.hidden = false;
+    checkerInstall.hidden = true;
+    checkerTitle.textContent = 'Добавить чекер';
+    checkerSub.textContent = 'Название и GUID для запуска на серверах.';
     checkerForm.reset();
     checkerGuidInput.value = newGuid();
     setCheckerNote('');
@@ -790,6 +877,10 @@ final class AdminPageController
   function closeCheckerModal() {
     checkerModal.hidden = true;
     document.body.classList.remove('modal-open');
+    checkerForm.hidden = false;
+    checkerInstall.hidden = true;
+    checkerTitle.textContent = 'Добавить чекер';
+    checkerSub.textContent = 'Название и GUID для запуска на серверах.';
     checkerForm.reset();
     setCheckerNote('');
   }
@@ -862,6 +953,14 @@ final class AdminPageController
 
   Array.prototype.forEach.call(checkerInfoModal.querySelectorAll('[data-close-checker-info]'), function (node) {
     node.addEventListener('click', closeCheckerInfo);
+  });
+
+  checkerInstallDone.addEventListener('click', closeCheckerModal);
+  checkerInstallCopy.addEventListener('click', function () {
+    copyText(checkerInstallCode.textContent || '', function () {
+      checkerInstallCopy.textContent = 'Скопировано';
+      window.setTimeout(function () { checkerInstallCopy.textContent = 'Скопировать'; }, 1500);
+    });
   });
 
   document.addEventListener('keydown', function (event) {
@@ -943,8 +1042,15 @@ final class AdminPageController
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name, guid: guid })
-    }).then(function () {
-      closeCheckerModal();
+    }).then(function (data) {
+      var checker = data && data.checker ? data.checker : null;
+
+      if (checker) {
+        showCheckerInstall(checker);
+      } else {
+        closeCheckerModal();
+      }
+
       return loadCheckers();
     }).catch(function (error) {
       if (error.status === 401) {
@@ -960,7 +1066,7 @@ final class AdminPageController
           setCheckerNote('Чекер с таким названием уже существует.', 'error');
         }
       } else if (error.status === 422) {
-        setCheckerNote('Проверьте название, GUID и команду.', 'error');
+        setCheckerNote('Проверьте название и GUID.', 'error');
       } else {
         setCheckerNote('Не удалось добавить чекер.', 'error');
       }
