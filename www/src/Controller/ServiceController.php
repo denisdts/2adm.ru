@@ -30,15 +30,23 @@ final class ServiceController
 
     public function index(Request $request): Response
     {
-        $key = $this->guard->forRead($request);
-        $checkerId = $this->requireChecker($request, $key?->id);
+        $key = $this->guard->require($request);
+        $checkerId = $this->requireChecker($request, $key->id);
 
         $services = $this->services->all();
         $shardingEnabled = (bool) $this->config->get('monitoring.sharding_enabled', true);
         $checkers = [];
         $assigned = $services;
 
-        if ($shardingEnabled) {
+        if (!$key->isGlobal()) {
+            // A service-scoped key only gets its own service and does not
+            // participate in sharding, so it cannot enumerate the catalogue.
+            $assigned = array_values(array_filter(
+                $services,
+                static fn (array $service): bool => (string) ($service['slug'] ?? '') === (string) $key->serviceSlug,
+            ));
+            $shardingEnabled = false;
+        } elseif ($shardingEnabled) {
             $window = max(1, (int) $this->config->get('monitoring.checker_alive_window', 300));
             $checkers = $this->checkers->alive($window, $checkerId);
             $assigned = CheckerShard::filter($services, $checkers, $checkerId);
@@ -52,7 +60,7 @@ final class ServiceController
                 'enabled' => $shardingEnabled,
                 'checker_id' => $checkerId,
                 'assigned' => count($assigned),
-                'total' => count($services),
+                'total' => $key->isGlobal() ? count($services) : count($assigned),
                 'checkers' => count($checkers),
             ],
         ]);

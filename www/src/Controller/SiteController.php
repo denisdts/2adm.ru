@@ -10,6 +10,7 @@ use App\Http\Request;
 use App\Http\Response;
 use App\Repository\MetricsRepository;
 use App\Repository\ServiceRepository;
+use App\Support\SiteHost;
 use PDOException;
 
 /**
@@ -55,7 +56,7 @@ final class SiteController
             throw new ApiException('A site address is required.', 422, 'validation_failed');
         }
 
-        $slug = $this->slugFromUrl($raw);
+        $slug = SiteHost::fromUrl($raw);
 
         if ($slug === null) {
             throw new ApiException('Enter a valid site address, e.g. https://example.com.', 422, 'validation_failed');
@@ -210,40 +211,5 @@ final class SiteController
         }
 
         return new ApiException('This site has already been added.', 409, 'site_exists');
-    }
-
-    private function slugFromUrl(string $value): ?string
-    {
-        if (preg_match('/\s/', $value) === 1) {
-            return null;
-        }
-
-        $url = $value;
-
-        if (preg_match('~^[a-z][a-z0-9+.-]*://~i', $url) !== 1) {
-            $url = 'https://' . $url;
-        }
-
-        $host = parse_url($url, PHP_URL_HOST);
-
-        if (!is_string($host) || $host === '') {
-            return null;
-        }
-
-        $host = strtolower(rtrim($host, '.'));
-
-        if (function_exists('idn_to_ascii')) {
-            $ascii = idn_to_ascii($host, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
-
-            if (is_string($ascii) && $ascii !== '') {
-                $host = $ascii;
-            }
-        }
-
-        if (preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/', $host) !== 1) {
-            return null;
-        }
-
-        return $host;
     }
 }

@@ -46,6 +46,25 @@ final class AuthController
         ], 201)->withHeader('Cache-Control', 'no-store');
     }
 
+    public function checkEmail(Request $request): Response
+    {
+        $email = strtolower(trim((string) $request->queryParam('email', '')));
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 190) {
+            return Response::json([
+                'email' => $email,
+                'valid' => false,
+                'available' => false,
+            ], 422)->withHeader('Cache-Control', 'no-store');
+        }
+
+        return Response::json([
+            'email' => $email,
+            'valid' => true,
+            'available' => $this->authenticator->emailAvailable($email),
+        ])->withHeader('Cache-Control', 'no-store');
+    }
+
     public function logout(Request $request): Response
     {
         $this->authenticator->logout($request);

@@ -24,6 +24,7 @@ final class UserAuthenticator
     private const FAIL_PREFIX = 'login:fail:';
     private const REGISTER_ATTEMPT_PREFIX = 'register:attempt:';
     private const TOUCH_PREFIX = 'session:used:';
+    private const DUMMY_PASSWORD_HASH = '$2y$12$r4zeBmtGtkhREtciS3xM/.6V6QUpmh6aSS/JivmmElRrfdVqEjeGG';
 
     public function __construct(
         private readonly Config $config,
@@ -49,8 +50,10 @@ final class UserAuthenticator
         }
 
         $record = $this->users->findByLogin($login);
+        $passwordHash = $record === null ? self::DUMMY_PASSWORD_HASH : (string) $record['password_hash'];
+        $passwordValid = password_verify($password, $passwordHash);
 
-        if ($record === null || !password_verify($password, (string) $record['password_hash'])) {
+        if ($record === null || !$passwordValid) {
             $this->recordAttempt($request, self::FAIL_PREFIX);
 
             throw new ApiException('Invalid login or password.', 401, 'invalid_credentials');
@@ -82,20 +85,28 @@ final class UserAuthenticator
         $companyName = trim((string) ($payload['company'] ?? $payload['company_name'] ?? ''));
         $password = (string) ($payload['password'] ?? '');
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 190) {
             throw new ApiException('A valid email is required.', 422, 'validation_failed');
+        }
+
+        if ($name === '') {
+            throw new ApiException('A name is required.', 422, 'validation_failed');
+        }
+
+        if (mb_strlen($name) < 3) {
+            throw new ApiException('A name must be at least 3 characters.', 422, 'validation_failed');
         }
 
         if ($companyName === '') {
             throw new ApiException('A company name is required.', 422, 'validation_failed');
         }
 
-        if (strlen($password) < 8) {
-            throw new ApiException('Password must be at least 8 characters.', 422, 'validation_failed');
+        if (mb_strlen($companyName) < 3) {
+            throw new ApiException('A company name must be at least 3 characters.', 422, 'validation_failed');
         }
 
-        if ($name === '') {
-            $name = (string) strstr($email, '@', true);
+        if (mb_strlen($password) < 8) {
+            throw new ApiException('Password must be at least 8 characters.', 422, 'validation_failed');
         }
 
         $name = mb_substr($name, 0, 128);
@@ -138,6 +149,11 @@ final class UserAuthenticator
         }
 
         return $user;
+    }
+
+    public function emailAvailable(string $email): bool
+    {
+        return $this->users->findByEmail(strtolower(trim($email))) === null;
     }
 
     public function user(Request $request): ?User

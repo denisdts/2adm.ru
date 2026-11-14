@@ -106,9 +106,9 @@ docker compose \
 | Метод | Путь | Назначение |
 | --- | --- | --- |
 | `POST` | `/api/v1/metrics` | приём метрик, заголовок `X-Api-Key` |
-| `GET` | `/api/v1/metrics/{service}` | временной ряд (`name`, `from`, `to`, `step`, `limit`, `checker_id`); без `checker_id` точки сгруппированы по чекерам |
-| `GET` | `/api/v1/metrics/{service}/latest` | последние значения из Redis по каждому чекеру (`checker_id`); `?checker_id=N` оставляет один чекер |
-| `GET` | `/api/v1/services` | срез сервисов для вызвавшего чекера с доменными/SSL-полями; `?ssl=true&domain=true` включает сбор данных; требует `X-Checker-Guid` зарегистрированного чекера; в ответе `shard` (`enabled`, `checker_id`, `assigned`, `total`, `checkers`) |
+| `GET` | `/api/v1/metrics/{service}` | временной ряд (`name`, `from`, `to`, `step`, `limit`, `checker_id`); без `checker_id` точки сгруппированы по чекерам; требует `X-Api-Key` или Bearer при `API_REQUIRE_READ_AUTH=true` |
+| `GET` | `/api/v1/metrics/{service}/latest` | последние значения из Redis по каждому чекеру (`checker_id`); `?checker_id=N` оставляет один чекер; требует `X-Api-Key` или Bearer при `API_REQUIRE_READ_AUTH=true` |
+| `GET` | `/api/v1/services` | срез сервисов для вызвавшего чекера; `?ssl=true&domain=true` включает сбор данных; требует `X-Api-Key` и `X-Checker-Guid` зарегистрированного чекера; глобальный ключ получает шард, service-ключ — только свой сервис; в ответе `shard` (`enabled`, `checker_id`, `assigned`, `total`, `checkers`) |
 | `GET` | `/api/v1/sites` | сайты компании пользователя, `Authorization: Bearer <token>` |
 | `POST` | `/api/v1/sites` | добавить сайт компании, JSON `{url, name}`, Bearer-токен |
 | `PUT` | `/api/v1/sites/{slug}/metadata` | доменные и SSL-данные сайта от чекера, `X-Api-Key` |
@@ -127,6 +127,7 @@ docker compose \
 | `GET` | `/api/v1/health` | состояние хранилищ |
 | `POST` | `/api/v1/auth/login` | вход в панель, JSON `{email, password}` → bearer-токен |
 | `POST` | `/api/v1/auth/register` | регистрация, JSON `{name, company, email, password}` → bearer-токен и созданная компания |
+| `GET` | `/api/v1/auth/check-email?email=<email>` | проверка формата и занятости email для формы регистрации |
 | `GET` | `/api/v1/auth/me` | текущий пользователь, заголовок `Authorization: Bearer <token>` |
 | `POST` | `/api/v1/auth/logout` | выход, отзывает токен |
 
@@ -137,6 +138,17 @@ docker compose \
 `GET /api/v1/services` возвращает чекеру только его срез сайтов. Распределение считается на стороне API по rendezvous hashing: владелец сайта — живой чекер с максимальным `sha256(guid + ":" + slug)`. Живым считается чекер, у которого `checkers.last_seen_at` не старше `CHECKER_ALIVE_WINDOW` секунд; текущий чекер включается всегда. При добавлении или остановке чекера перемещаются только сайты, которыми он владел, остальные сохраняют прежнего владельца. Срез пересчитывается на каждом цикле, поэтому чекер не нужно перезапускать после изменения состава.
 
 Переменные: `CHECKER_SHARDING_ENABLED` (по умолчанию `true`; `false` — отдать всем чекерам полный список для быстрого отката) и `CHECKER_ALIVE_WINDOW` (по умолчанию `300` секунд; должен быть больше `CHECK_INTERVAL` и максимальной длительности цикла проверки). Чекеру обновление не требуется: протокол и формат ответа обратно совместимы, новые поля `shard` старые версии игнорируют.
+
+### Безопасность
+
+- `GET /api/v1/services` требует валидный API-ключ: глобальный ключ получает свой шард, ключ со scope `service` — только свой сервис и не участвует в шардинге. `POST /api/v1/checkers/heartbeat` принимает любой валидный ключ. Чекеры уже отправляют `X-Api-Key`, поэтому обновление API для них обратно совместимо.
+- В production `API_REQUIRE_READ_AUTH=true`: чтение метрик требует `X-Api-Key` или Bearer-токен панели. Если явно выставить `false`, анонимные чтения ограничиваются `API_ANONYMOUS_RATE_LIMIT_PER_MINUTE` запросами в минуту на IP.
+- При добавлении сайта API отклоняет `localhost`, односоставные имена, `.local/.internal/.home.arpa/.test/.invalid/.example`, приватные, loopback, link-local, CGNAT и зарезервированные IP, а также домены, которые сейчас резолвятся в такие адреса.
+- Чекер дополнительно проверяет IP уже при установке TCP-соединения: приватные и зарезервированные адреса блокируются и для редиректов, и при DNS rebinding. Для внутренних сайтов это можно отключить через `CHECK_ALLOW_PRIVATE=true` в `checker.env` (осознанно принимая SSRF-риск).
+- Nginx отдаёт `Content-Security-Policy`, `X-Frame-Options: DENY`, `Permissions-Policy`, `X-Content-Type-Options` и `Referrer-Policy`. API-ответы помечаются `Cache-Control: no-store`.
+- Порт приложения 7060 не должен быть доступен из интернета: в production используйте `APP_BIND=127.0.0.1` и reverse proxy с TLS.
+- Для embedded ClickHouse/Redis задайте отдельные `CLICKHOUSE_PASSWORD` и `REDIS_PASSWORD`, даже если их порты не публикуются наружу.
+- `API_RATE_LIMIT_PER_MINUTE` должен быть не меньше числа запросов, которые один чекер делает за минуту (при 500 сайтах на чекер и 4 метриках на сайт — примерно 500 запросов на ингест).
 
 Данные страницы сайта `/dash/site/{slug}`:
 
@@ -204,7 +216,7 @@ cd checker
 go run .
 ```
 
-Переменные: `MONITOR_BASE_URL`, `MONITOR_API_KEY`, `CHECKER_GUID`, `CHECK_INTERVAL` (по умолчанию `60s`), `CHECK_TIMEOUT`, `CHECK_CONCURRENCY`, `CHECK_SSL`, `CHECK_DOMAIN`, `CHECK_DOMAIN_INTERVAL` (по умолчанию `24h`), `CHECKER_NAME`, `CHECK_USER_AGENT`.
+Переменные: `MONITOR_BASE_URL`, `MONITOR_API_KEY`, `CHECKER_GUID`, `CHECK_INTERVAL` (по умолчанию `60s`), `CHECK_TIMEOUT`, `CHECK_CONCURRENCY`, `CHECK_SSL`, `CHECK_DOMAIN`, `CHECK_ALLOW_PRIVATE` (по умолчанию `false`; разрешает проверки приватных адресов), `CHECK_DOMAIN_INTERVAL` (по умолчанию `24h`), `CHECKER_NAME`, `CHECK_USER_AGENT`.
 
 `CHECKER_GUID` — уникальный UUID чекера. `install.sh` генерирует его при установке и записывает в `checker.env`. Если переменная пуста, чекер ищет/создаёт файл `checker.guid` рядом с бинарником (можно переопределить через `CHECKER_GUID_FILE`). GUID отправляется в заголовке `X-Checker-Guid` и в теле heartbeat, по нему API отличает чекеры и привязывает к ним метрики и сайты. В админке при создании чекера GUID генерируется автоматически, показывается под названием только для чтения и сохраняется в `checkers.guid` — его нужно указать в `checker.env` на сервере.
 
@@ -451,6 +463,9 @@ git push origin production
 - `CLICKHOUSE_*` — ClickHouse;
 - `REDIS_*` — Redis;
 - `API_RATE_LIMIT_PER_MINUTE` — лимит запросов на ключ;
+- `API_REQUIRE_READ_AUTH` — требовать ключ или Bearer для чтения метрик (`true` в production);
+- `API_ANONYMOUS_RATE_LIMIT_PER_MINUTE` — лимит анонимных чтений на IP, если read auth выключен;
 - `METRICS_RETENTION_DAYS` — TTL сырых метрик в ClickHouse;
+- `CHECKER_SHARDING_ENABLED`, `CHECKER_ALIVE_WINDOW` — шардирование сайтов между чекерами;
 - `MIGRATE_ON_START` — применять схему при старте;
 - `AUTO_COMPOSER_INSTALL` — ставить зависимости при старте (только локально).

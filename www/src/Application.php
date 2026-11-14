@@ -80,7 +80,7 @@ final class Application
         $authController = new AuthController($userAuthenticator);
         $adminController = new AdminController($userAuthenticator, $adminRepository, $users);
         $checkerController = new CheckerController($guard, $checkerRepository, $this->config, $userAuthenticator);
-        $metricsController = new MetricsController($metrics, $guard, $checkerRepository, $this->config);
+        $metricsController = new MetricsController($metrics, $guard, $checkerRepository, $services, $this->config, $userAuthenticator);
         $serviceController = new ServiceController($services, $guard, $checkerRepository, $this->config);
         $siteController = new SiteController($services, $userAuthenticator, $metricsRepository);
 
@@ -152,6 +152,7 @@ final class Application
         // dashboard auth
         $router->post('/api/v1/auth/login', static fn (Request $request): Response => $authController->login($request));
         $router->post('/api/v1/auth/register', static fn (Request $request): Response => $authController->register($request));
+        $router->get('/api/v1/auth/check-email', static fn (Request $request): Response => $authController->checkEmail($request));
         $router->get('/api/v1/auth/me', static fn (Request $request): Response => $authController->me($request));
         $router->post('/api/v1/auth/logout', static fn (Request $request): Response => $authController->logout($request));
 
@@ -178,7 +179,7 @@ final class Application
                 return $this->finalize(Response::json([
                     'error' => 'not_found',
                     'message' => sprintf('No route for %s %s.', $request->method, $request->path),
-                ], 404));
+                ], 404), $request->path);
             }
 
             [$handler, $params] = $match;
@@ -188,7 +189,7 @@ final class Application
                 throw new \RuntimeException('Route handler must return ' . Response::class . '.');
             }
 
-            return $this->finalize($response);
+            return $this->finalize($response, $request->path);
         } catch (ApiException $exception) {
             $body = [
                 'error' => $exception->error(),
@@ -199,7 +200,7 @@ final class Application
                 $body['details'] = $exception->context();
             }
 
-            return $this->finalize(Response::json($body, $exception->status()));
+            return $this->finalize(Response::json($body, $exception->status()), $request->path);
         } catch (Throwable $exception) {
             error_log(sprintf(
                 '[%s] %s: %s in %s:%d',
@@ -220,15 +221,21 @@ final class Application
                 $body['exception'] = $exception::class;
             }
 
-            return $this->finalize(Response::json($body, 500));
+            return $this->finalize(Response::json($body, 500), $request->path);
         }
     }
 
-    private function finalize(Response $response): Response
+    private function finalize(Response $response, string $path = ''): Response
     {
-        return $response
+        $response = $response
             ->withHeader('X-Content-Type-Options', 'nosniff')
             ->withHeader('X-Robots-Tag', 'noindex');
+
+        if (str_starts_with($path, '/api/')) {
+            $response = $response->withHeader('Cache-Control', 'no-store');
+        }
+
+        return $response;
     }
 
     /**

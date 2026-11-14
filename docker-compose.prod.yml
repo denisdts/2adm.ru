@@ -44,6 +44,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DATABASE: ${REDIS_DATABASE:-0}
       REDIS_PREFIX: ${REDIS_PREFIX:-mon:}
+      # Metric reads require an API key or a dashboard bearer token.
+      API_REQUIRE_READ_AUTH: "true"
       # code is baked into the image, dependencies are installed at build time
       AUTO_COMPOSER_INSTALL: "false"
       MIGRATE_ON_START: ${MIGRATE_ON_START:-true}

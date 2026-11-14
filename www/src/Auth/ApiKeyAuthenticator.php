@@ -129,7 +129,7 @@ final class ApiKeyAuthenticator
         return new ApiKey(
             (int) ($decoded['id'] ?? 0),
             (string) ($decoded['prefix'] ?? $prefix),
-            (string) ($decoded['scope'] ?? 'global'),
+            (string) ($decoded['scope'] ?? 'service'),
             isset($decoded['service_id']) ? (int) $decoded['service_id'] : null,
             $decoded['service_slug'] ?? null,
             (string) ($decoded['name'] ?? ''),

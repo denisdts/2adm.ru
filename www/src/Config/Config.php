@@ -32,8 +32,9 @@ final class Config
             ],
             'api' => [
                 'key_header' => Env::get('API_KEY_HEADER', 'X-Api-Key'),
-                'require_read_auth' => Env::bool('API_REQUIRE_READ_AUTH', false),
+                'require_read_auth' => Env::bool('API_REQUIRE_READ_AUTH', true),
                 'rate_limit_per_minute' => Env::int('API_RATE_LIMIT_PER_MINUTE', 600),
+                'anonymous_rate_limit_per_minute' => Env::int('API_ANONYMOUS_RATE_LIMIT_PER_MINUTE', 120),
                 'admin_key' => Env::get('API_ADMIN_KEY'),
             ],
             'mysql' => [

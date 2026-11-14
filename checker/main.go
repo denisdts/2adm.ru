@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -23,7 +24,7 @@ import (
 	"time"
 )
 
-var checkerVersion = "1.0.0"
+var checkerVersion = "1.0.1"
 
 type config struct {
 	baseURL        string
@@ -36,6 +37,7 @@ type config struct {
 	checkerName    string
 	checkSSL       bool
 	checkDomain    bool
+	allowPrivate   bool
 	domainInterval time.Duration
 }
 
@@ -160,6 +162,7 @@ func loadConfig() (config, error) {
 		checkerName:    env("CHECKER_NAME", "site-checker"),
 		checkSSL:       boolEnv("CHECK_SSL", false),
 		checkDomain:    boolEnv("CHECK_DOMAIN", false),
+		allowPrivate:   boolEnv("CHECK_ALLOW_PRIVATE", false),
 		domainInterval: 24 * time.Hour,
 	}
 
@@ -199,9 +202,32 @@ func run(ctx context.Context, cfg config) {
 		log.Fatalf("checker guid is empty")
 	}
 
-	apiClient := &http.Client{Timeout: 15 * time.Second}
+	apiClient := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return http.ErrUseLastResponse
+			}
+
+			if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+				return fmt.Errorf("refusing cross-host API redirect to %s", req.URL.Host)
+			}
+
+			return nil
+		},
+	}
+	checkDialer := newSafeDialer(cfg.timeout, cfg.allowPrivate)
 	checkClient := &http.Client{
 		Timeout: cfg.timeout,
+		Transport: &http.Transport{
+			Proxy:                 nil,
+			DialContext:           checkDialer.DialContext,
+			TLSHandshakeTimeout:   cfg.timeout,
+			ResponseHeaderTimeout: cfg.timeout,
+			IdleConnTimeout:       30 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   2,
+		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return http.ErrUseLastResponse
@@ -293,7 +319,7 @@ func checkCycle(ctx context.Context, cfg config, apiClient, checkClient *http.Cl
 			var domain *domainInfo
 
 			if domainEnabled {
-				domain = lookupDomain(ctx, apiClient, cfg, svc.Slug)
+				domain = lookupDomain(ctx, checkClient, cfg, svc.Slug)
 			}
 
 			var ssl *sslInfo
@@ -453,6 +479,81 @@ func checkService(ctx context.Context, client *http.Client, cfg config, svc serv
 	}
 }
 
+var blockedPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("2001:2::/48"),
+	netip.MustParsePrefix("2001:10::/28"),
+	netip.MustParsePrefix("2001:20::/28"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+}
+
+// newSafeDialer refuses to connect to loopback, private, link-local and
+// otherwise reserved addresses. The check runs after DNS resolution, so it
+// also protects against redirects and DNS rebinding.
+func newSafeDialer(timeout time.Duration, allowPrivate bool) *net.Dialer {
+	dialer := &net.Dialer{Timeout: timeout}
+
+	if allowPrivate {
+		return dialer
+	}
+
+	dialer.Control = func(network, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+
+		addr, err := netip.ParseAddr(host)
+		if err != nil {
+			return fmt.Errorf("unsupported address %q", host)
+		}
+
+		if !isPublicAddr(addr) {
+			return fmt.Errorf("blocked non-public address %s", addr)
+		}
+
+		return nil
+	}
+
+	return dialer
+}
+
+func isPublicAddr(addr netip.Addr) bool {
+	addr = addr.Unmap()
+
+	if !addr.IsValid() ||
+		addr.IsUnspecified() ||
+		addr.IsLoopback() ||
+		addr.IsPrivate() ||
+		addr.IsLinkLocalUnicast() ||
+		addr.IsLinkLocalMulticast() ||
+		addr.IsInterfaceLocalMulticast() ||
+		addr.IsMulticast() {
+		return false
+	}
+
+	for _, prefix := range blockedPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func doCheck(ctx context.Context, client *http.Client, cfg config, url string) (int, float64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 
@@ -576,9 +677,9 @@ func sendMetrics(ctx context.Context, client *http.Client, cfg config, result ch
 }
 
 func fetchCertificate(cfg config, host string) (sslInfo, error) {
-	dialer := &net.Dialer{Timeout: cfg.timeout}
+	dialer := newSafeDialer(cfg.timeout, cfg.allowPrivate)
 
-	conn, err := tls.DialWithDialer(dialer, "tcp", host+":443", &tls.Config{
+	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, "443"), &tls.Config{
 		ServerName:         host,
 		InsecureSkipVerify: true,
 	})
@@ -710,7 +811,7 @@ func fetchWhoisInfo(cfg config, host string) (*domainInfo, error) {
 		return nil, fmt.Errorf("no whois server for %s", host)
 	}
 
-	conn, err := net.DialTimeout("tcp", server+":43", cfg.timeout)
+	conn, err := newSafeDialer(cfg.timeout, cfg.allowPrivate).Dial("tcp", net.JoinHostPort(server, "43"))
 
 	if err != nil {
 		return nil, err

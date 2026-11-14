@@ -202,6 +202,15 @@ final class DashboardController
     font: inherit; font-size: 15px; color: var(--text); background: #fff;
   }
   .field input:focus { outline: 2px solid rgba(37, 99, 235, .35); outline-offset: 1px; border-color: var(--accent); }
+  .field.is-valid input { border-color: #16a34a; box-shadow: 0 0 0 3px rgba(22, 163, 74, .13); }
+  .field.is-valid input:focus { outline-color: rgba(22, 163, 74, .35); border-color: #16a34a; }
+  .field.is-invalid input { border-color: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, .12); }
+  .field.is-invalid input:focus { outline-color: rgba(220, 38, 38, .35); border-color: #dc2626; }
+  .field.is-checking input { border-color: #93c5fd; }
+  .field-hint { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .field-hint:empty { display: none; }
+  .field-hint.error { color: #b91c1c; }
+  .field-hint.ok { color: #047857; }
   .form-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 20px; font-size: 13px; }
   .checkbox { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); cursor: pointer; }
   .checkbox input { width: 15px; height: 15px; accent-color: var(--accent); }
@@ -420,19 +429,23 @@ final class DashboardController
     <form id="registerForm" hidden novalidate>
       <label class="field">
         <span>Имя</span>
-        <input type="text" name="name" autocomplete="name" placeholder="Как к вам обращаться">
+        <input type="text" name="name" autocomplete="name" placeholder="Как к вам обращаться" required>
+        <small class="field-hint"></small>
       </label>
       <label class="field">
         <span>Компания</span>
         <input type="text" name="company" autocomplete="organization" placeholder="Название компании" required>
+        <small class="field-hint"></small>
       </label>
       <label class="field">
         <span>Email</span>
         <input type="email" name="email" autocomplete="email" placeholder="you@example.com" required>
+        <small class="field-hint"></small>
       </label>
       <label class="field">
         <span>Пароль</span>
         <input type="password" name="password" autocomplete="new-password" placeholder="Минимум 8 символов" required>
+        <small class="field-hint"></small>
       </label>
       <button class="btn btn-primary btn-block" type="submit" id="registerSubmit">Создать аккаунт</button>
       <p class="form-note" id="registerNote" role="status"></p>
@@ -480,6 +493,16 @@ final class DashboardController
   var toastTimer = null;
   var modalMode = 'login';
   var registerNameInput = registerForm.querySelector('input[name="name"]');
+  var registerCompanyInput = registerForm.querySelector('input[name="company"]');
+  var registerEmailInput = registerForm.querySelector('input[name="email"]');
+  var registerPasswordInput = registerForm.querySelector('input[name="password"]');
+  var registerInputs = [registerNameInput, registerCompanyInput, registerEmailInput, registerPasswordInput];
+  var registerBlurred = { name: false, company: false, email: false, password: false };
+  var emailCheckSeq = 0;
+  var emailCheckTimer = null;
+  var emailCheckValue = '';
+  var emailCheckResult = null;
+  var EMAIL_PATTERN = /^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,63}$/;
 
   var TOKEN_KEY = 'adm_token';
   var state = { token: readToken(), user: null };
@@ -522,6 +545,166 @@ final class DashboardController
   function setRegisterNote(message, isError) {
     registerNote.textContent = message;
     registerNote.className = 'form-note' + (isError ? ' error' : '');
+  }
+
+  function registerField(input) {
+    return input && input.closest ? input.closest('.field') : null;
+  }
+
+  function setRegisterFieldState(input, state, message) {
+    var field = registerField(input);
+
+    if (!field) return;
+
+    field.classList.toggle('is-valid', state === 'valid');
+    field.classList.toggle('is-invalid', state === 'invalid');
+    field.classList.toggle('is-checking', state === 'checking');
+    input.setAttribute('aria-invalid', state === 'invalid' ? 'true' : 'false');
+
+    var hint = field.querySelector('.field-hint');
+
+    if (hint) {
+      hint.textContent = message || '';
+      hint.className = 'field-hint' + (state === 'invalid' ? ' error' : state === 'valid' ? ' ok' : '');
+    }
+  }
+
+  function resetRegisterField(input) {
+    setRegisterFieldState(input, 'idle', '');
+  }
+
+  function resetEmailCheck() {
+    emailCheckSeq += 1;
+    emailCheckValue = '';
+    emailCheckResult = null;
+    window.clearTimeout(emailCheckTimer);
+  }
+
+  function resetRegisterValidation() {
+    resetEmailCheck();
+    registerBlurred = { name: false, company: false, email: false, password: false };
+    registerInputs.forEach(resetRegisterField);
+  }
+
+  function validateRegisterName() {
+    var value = registerNameInput.value.trim();
+
+    if (value === '') {
+      setRegisterFieldState(registerNameInput, 'invalid', 'Введите имя');
+      return false;
+    }
+
+    if (value.length < 3) {
+      setRegisterFieldState(registerNameInput, 'invalid', 'Минимум 3 символа');
+      return false;
+    }
+
+    setRegisterFieldState(registerNameInput, 'valid', '');
+    return true;
+  }
+
+  function validateRegisterCompany() {
+    var value = registerCompanyInput.value.trim();
+
+    if (value === '') {
+      setRegisterFieldState(registerCompanyInput, 'invalid', 'Введите название компании');
+      return false;
+    }
+
+    if (value.length < 3) {
+      setRegisterFieldState(registerCompanyInput, 'invalid', 'Минимум 3 символа');
+      return false;
+    }
+
+    setRegisterFieldState(registerCompanyInput, 'valid', '');
+    return true;
+  }
+
+  function validateRegisterPassword(required) {
+    var value = registerPasswordInput.value;
+
+    if (value === '') {
+      if (required) {
+        setRegisterFieldState(registerPasswordInput, 'invalid', 'Введите пароль');
+        return false;
+      }
+
+      resetRegisterField(registerPasswordInput);
+      return true;
+    }
+
+    if (value.length < 8) {
+      setRegisterFieldState(registerPasswordInput, 'invalid', 'Минимум 8 символов');
+      return false;
+    }
+
+    setRegisterFieldState(registerPasswordInput, 'valid', '');
+    return true;
+  }
+
+  function validEmailFormat(value) {
+    return value.length <= 190 && EMAIL_PATTERN.test(value);
+  }
+
+  function validateRegisterEmail() {
+    var value = registerEmailInput.value.trim();
+
+    if (value === '') {
+      setRegisterFieldState(registerEmailInput, 'invalid', 'Введите email');
+      return false;
+    }
+
+    if (!validEmailFormat(value)) {
+      setRegisterFieldState(registerEmailInput, 'invalid', 'Некорректный email');
+      return false;
+    }
+
+    return true;
+  }
+
+  function checkEmailAvailability(email) {
+    if (emailCheckValue === email && emailCheckResult !== null) {
+      return Promise.resolve(emailCheckResult);
+    }
+
+    emailCheckSeq += 1;
+    var seq = emailCheckSeq;
+
+    setRegisterFieldState(registerEmailInput, 'checking', 'Проверяем email…');
+
+    return api('/api/v1/auth/check-email?email=' + encodeURIComponent(email)).then(function (data) {
+      if (seq !== emailCheckSeq) return null;
+
+      var available = !!(data && data.available);
+      emailCheckValue = email;
+      emailCheckResult = available;
+
+      if (available) {
+        setRegisterFieldState(registerEmailInput, 'valid', 'Email свободен');
+      } else {
+        setRegisterFieldState(registerEmailInput, 'invalid', 'Email уже зарегистрирован');
+      }
+
+      return available;
+    }).catch(function (error) {
+      if (seq !== emailCheckSeq) return null;
+
+      emailCheckValue = '';
+      emailCheckResult = null;
+
+      if (error && error.status === 422) {
+        setRegisterFieldState(registerEmailInput, 'invalid', 'Некорректный email');
+        return null;
+      }
+
+      if (error && error.status === 429) {
+        setRegisterFieldState(registerEmailInput, 'idle', 'Слишком много проверок. Попробуйте позже.');
+        return null;
+      }
+
+      setRegisterFieldState(registerEmailInput, 'idle', 'Не удалось проверить email');
+      return null;
+    });
   }
 
   function showToast(message) {
@@ -607,6 +790,7 @@ final class DashboardController
     document.body.classList.add('modal-open');
     setNote('');
     setRegisterNote('');
+    resetRegisterValidation();
 
     if (!state.user) {
       var input = modalMode === 'register' ? registerNameInput : loginInput;
@@ -619,6 +803,7 @@ final class DashboardController
     updateAuthUi();
     setNote('');
     setRegisterNote('');
+    resetRegisterValidation();
     (modalMode === 'register' ? registerNameInput : loginInput).focus();
   }
 
@@ -629,6 +814,7 @@ final class DashboardController
     registerForm.reset();
     setNote('');
     setRegisterNote('');
+    resetRegisterValidation();
 
     if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
   }
@@ -719,43 +905,114 @@ final class DashboardController
     });
   });
 
+  registerNameInput.addEventListener('blur', function () {
+    registerBlurred.name = true;
+    validateRegisterName();
+  });
+
+  registerNameInput.addEventListener('input', function () {
+    if (registerBlurred.name) validateRegisterName();
+  });
+
+  registerCompanyInput.addEventListener('blur', function () {
+    registerBlurred.company = true;
+    validateRegisterCompany();
+  });
+
+  registerCompanyInput.addEventListener('input', function () {
+    if (registerBlurred.company) validateRegisterCompany();
+  });
+
+  registerPasswordInput.addEventListener('blur', function () {
+    registerBlurred.password = true;
+    validateRegisterPassword(true);
+  });
+
+  registerPasswordInput.addEventListener('input', function () {
+    if (registerBlurred.password) validateRegisterPassword(true);
+  });
+
+  registerEmailInput.addEventListener('blur', function () {
+    registerBlurred.email = true;
+    window.clearTimeout(emailCheckTimer);
+
+    if (validateRegisterEmail()) {
+      checkEmailAvailability(registerEmailInput.value.trim());
+    }
+  });
+
+  registerEmailInput.addEventListener('input', function () {
+    resetEmailCheck();
+
+    if (!registerBlurred.email) return;
+    if (!validateRegisterEmail()) return;
+
+    setRegisterFieldState(registerEmailInput, 'checking', 'Проверяем email…');
+    emailCheckTimer = window.setTimeout(function () {
+      checkEmailAvailability(registerEmailInput.value.trim());
+    }, 450);
+  });
+
   registerForm.addEventListener('submit', function (event) {
     event.preventDefault();
     setRegisterNote('');
 
     var name = registerNameInput.value.trim();
-    var company = registerForm.querySelector('input[name="company"]').value.trim();
-    var email = registerForm.querySelector('input[name="email"]').value.trim();
-    var password = registerForm.querySelector('input[name="password"]').value;
+    var company = registerCompanyInput.value.trim();
+    var email = registerEmailInput.value.trim();
+    var password = registerPasswordInput.value;
 
-    if (company === '' || email === '' || password.length < 8) {
-      setRegisterNote('Укажите компанию, email и пароль не короче 8 символов.', true);
+    var nameValid = validateRegisterName();
+    var companyValid = validateRegisterCompany();
+    var emailValid = validateRegisterEmail();
+    var passwordValid = validateRegisterPassword(true);
+
+    if (!nameValid || !companyValid || !emailValid || !passwordValid) {
+      setRegisterNote('Проверьте выделенные поля.', true);
       return;
     }
 
     state.token = null;
     setRegisterBusy(true);
 
-    api('/api/v1/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, company: company, email: email, password: password })
-    }).then(function (data) {
-      saveToken(data.token, true);
-      state.token = data.token;
-      state.user = data.user;
-      window.location.assign('/dash/');
-    }).catch(function (error) {
-      if (error.status === 409) {
+    checkEmailAvailability(email).then(function (available) {
+      if (available === false) {
         setRegisterNote('Аккаунт с таким email уже существует.', true);
-      } else if (error.status === 422) {
-        setRegisterNote('Проверьте компанию, email и пароль (минимум 8 символов).', true);
-      } else if (error.status === 429) {
-        setRegisterNote('Слишком много попыток. Попробуйте позже.', true);
-      } else {
-        setRegisterNote('Не удалось зарегистрироваться. Попробуйте ещё раз.', true);
+        setRegisterBusy(false);
+        return;
       }
-    }).finally(function () {
+
+      if (available === null) {
+        setRegisterNote('Не удалось проверить email. Попробуйте ещё раз.', true);
+        setRegisterBusy(false);
+        return;
+      }
+
+      return api('/api/v1/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, company: company, email: email, password: password })
+      }).then(function (data) {
+        saveToken(data.token, true);
+        state.token = data.token;
+        state.user = data.user;
+        window.location.assign('/dash/');
+      }).catch(function (error) {
+        if (error.status === 409) {
+          setRegisterFieldState(registerEmailInput, 'invalid', 'Email уже зарегистрирован');
+          setRegisterNote('Аккаунт с таким email уже существует.', true);
+        } else if (error.status === 422) {
+          setRegisterNote('Проверьте имя, компанию, email и пароль (минимум 8 символов).', true);
+        } else if (error.status === 429) {
+          setRegisterNote('Слишком много попыток. Попробуйте позже.', true);
+        } else {
+          setRegisterNote('Не удалось зарегистрироваться. Попробуйте ещё раз.', true);
+        }
+      }).finally(function () {
+        setRegisterBusy(false);
+      });
+    }).catch(function () {
+      setRegisterNote('Не удалось проверить email. Попробуйте ещё раз.', true);
       setRegisterBusy(false);
     });
   });
