@@ -174,6 +174,8 @@ final class AdminPageController
   .icon-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   .icon-btn svg { display: block; width: 18px; height: 18px; }
   .info-grid { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 10px 16px; margin: 0; }
+  .checker-edit-form { margin-bottom: 22px; }
+  .checker-edit-form .modal-actions { margin-top: 12px; }
   .info-grid dt { color: var(--muted); font-size: 13px; font-weight: 600; }
   .info-grid dd { margin: 0; font-size: 14px; word-break: break-word; }
   .info-grid dd code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
@@ -446,8 +448,18 @@ final class AdminPageController
   <div class="modal-backdrop" data-close-checker-info></div>
   <div class="modal-dialog scrollable" role="dialog" aria-modal="true" aria-labelledby="checkerInfoTitle">
     <button class="modal-close" type="button" data-close-checker-info aria-label="Закрыть">&times;</button>
-    <h2 id="checkerInfoTitle">Информация о чекере</h2>
-    <p class="sub">Данные чекера из базы.</p>
+    <h2 id="checkerInfoTitle">Настройки чекера</h2>
+    <p class="sub">Название можно изменить, GUID и данные регистрации доступны только для чтения.</p>
+    <form id="checkerEditForm" class="checker-edit-form" novalidate>
+      <label class="field">
+        <span>Название</span>
+        <input type="text" name="name" autocomplete="off" maxlength="128" placeholder="Например, site-checker-eu" required>
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-primary" type="submit" id="checkerEditSubmit">Сохранить</button>
+      </div>
+      <p class="form-note" id="checkerEditNote" role="status"></p>
+    </form>
     <dl class="info-grid" id="checkerInfoBody"></dl>
     <div class="install-section">
       <h3>Установка на новом сервере</h3>
@@ -479,6 +491,11 @@ final class AdminPageController
   var checkerGuidInput = checkerForm.querySelector('input[name="guid"]');
   var checkerInfoModal = document.getElementById('checkerInfoModal');
   var checkerInfoBody = document.getElementById('checkerInfoBody');
+  var checkerEditForm = document.getElementById('checkerEditForm');
+  var checkerEditName = checkerEditForm.querySelector('input[name="name"]');
+  var checkerEditSubmit = document.getElementById('checkerEditSubmit');
+  var checkerEditNote = document.getElementById('checkerEditNote');
+  var editingChecker = null;
   var checkerInstall = document.getElementById('checkerInstall');
   var checkerInstallCode = document.getElementById('checkerInstallCode');
   var checkerInstallHint = document.getElementById('checkerInstallHint');
@@ -797,6 +814,16 @@ final class AdminPageController
     checkerSubmit.textContent = busy ? 'Добавление…' : 'Добавить';
   }
 
+  function setCheckerEditNote(message, state) {
+    checkerEditNote.textContent = message;
+    checkerEditNote.className = 'form-note' + (state ? ' ' + state : '');
+  }
+
+  function setCheckerEditBusy(busy) {
+    checkerEditSubmit.disabled = busy;
+    checkerEditSubmit.textContent = busy ? 'Сохранение…' : 'Сохранить';
+  }
+
   function newGuid() {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
       return window.crypto.randomUUID();
@@ -930,12 +957,15 @@ final class AdminPageController
 
   function openCheckerInfo(checker) {
     checkerInfoBody.replaceChildren();
+    editingChecker = checker;
+    checkerEditName.value = checker.name || '';
+    setCheckerEditNote('');
+    setCheckerEditBusy(false);
 
     var status = el('span', 'badge ' + (checker.online ? 'ok' : 'warn'), checker.online ? 'Онлайн' : 'Офлайн');
 
     addCheckerInfoRow('ID', String(checker.id));
     addCheckerInfoRow('GUID', checker.guid || '—');
-    addCheckerInfoRow('Название', checker.name || '—');
     addCheckerInfoRow('Статус', status);
     addCheckerInfoRow('Хост', checker.host || '—');
     addCheckerInfoRow('IP-адрес', checker.ip || '—');
@@ -956,6 +986,10 @@ final class AdminPageController
   function closeCheckerInfo() {
     checkerInfoModal.hidden = true;
     document.body.classList.remove('modal-open');
+    editingChecker = null;
+    checkerEditForm.reset();
+    setCheckerEditNote('');
+    setCheckerEditBusy(false);
   }
 
   function setTab(name) {
@@ -1046,6 +1080,57 @@ final class AdminPageController
       }
     }).finally(function () {
       setAdminBusy(false);
+    });
+  });
+
+  checkerEditForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    setCheckerEditNote('');
+
+    if (editingChecker === null) {
+      return;
+    }
+
+    var name = checkerEditName.value.trim();
+
+    if (name === '') {
+      setCheckerEditNote('Укажите название чекера.', 'error');
+      return;
+    }
+
+    setCheckerEditBusy(true);
+
+    api('/api/v1/admin/checkers/' + encodeURIComponent(editingChecker.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    }).then(function (data) {
+      var checker = data && data.checker ? data.checker : null;
+
+      if (checker) {
+        editingChecker = checker;
+        checkerEditName.value = checker.name || name;
+      }
+
+      setCheckerEditNote('Название сохранено.', 'ok');
+      loadCheckers().catch(function () {});
+    }).catch(function (error) {
+      if (error.status === 401) {
+        loginRedirect();
+        return;
+      }
+
+      if (error.status === 409) {
+        setCheckerEditNote('Чекер с таким названием уже существует.', 'error');
+      } else if (error.status === 404) {
+        setCheckerEditNote('Чекер не найден.', 'error');
+      } else if (error.status === 422) {
+        setCheckerEditNote('Проверьте название (до 128 символов).', 'error');
+      } else {
+        setCheckerEditNote('Не удалось сохранить название.', 'error');
+      }
+    }).finally(function () {
+      setCheckerEditBusy(false);
     });
   });
 

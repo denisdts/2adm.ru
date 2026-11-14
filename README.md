@@ -119,6 +119,7 @@ docker compose \
 | `GET` | `/api/v1/admin/sites` | сайты, Bearer администратора |
 | `GET` | `/api/v1/admin/checkers` | чекеры, Bearer администратора |
 | `POST` | `/api/v1/admin/checkers` | добавить чекер: `{name, bash_command, guid}`; `guid` генерируется на форме, если не передан |
+| `PUT` | `/api/v1/admin/checkers/{id}` | изменить название чекера: `{name}`, Bearer администратора |
 | `GET` | `/api/v1/admin/notifications` | уведомления, Bearer администратора |
 | `POST` | `/api/v1/admin/administrators` | создать администратора |
 | `GET` | `/api/v1/sites/{slug}` | данные сайта из MySQL: домен, SSL, дата добавления |

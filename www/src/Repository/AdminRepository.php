@@ -98,6 +98,22 @@ final class AdminRepository
         ) > 0;
     }
 
+    public function checkerNameExistsExcept(string $name, int $id): bool
+    {
+        return (int) $this->db->fetchValue(
+            'SELECT COUNT(*) FROM checkers WHERE name = :name AND id <> :id',
+            ['name' => $name, 'id' => $id],
+        ) > 0;
+    }
+
+    public function updateCheckerName(int $id, string $name): void
+    {
+        $this->db->execute(
+            'UPDATE checkers SET name = :name WHERE id = :id',
+            ['name' => $name, 'id' => $id],
+        );
+    }
+
     public function createChecker(string $name, ?string $bashCommand, string $guid): int
     {
         return $this->db->insert('checkers', [

@@ -180,6 +180,51 @@ final class AdminController
         ], 201)->withHeader('Cache-Control', 'no-store');
     }
 
+    /**
+     * @param array<string, string> $params
+     */
+    public function updateChecker(Request $request, array $params): Response
+    {
+        $this->requireAdmin($request);
+
+        $rawId = (string) ($params['id'] ?? '');
+
+        if (preg_match('/^[1-9][0-9]*$/', $rawId) !== 1) {
+            throw new ApiException('Invalid checker id.', 422, 'validation_failed');
+        }
+
+        $id = (int) $rawId;
+
+        if ($this->admin->checker($id) === null) {
+            throw new ApiException('Checker not found.', 404, 'not_found');
+        }
+
+        $payload = $request->json();
+        $name = trim((string) ($payload['name'] ?? ''));
+
+        if ($name === '' || strlen($name) > 128) {
+            throw new ApiException('Field "name" is required.', 422, 'validation_failed');
+        }
+
+        if ($this->admin->checkerNameExistsExcept($name, $id)) {
+            throw new ApiException('A checker with this name already exists.', 409, 'checker_exists');
+        }
+
+        try {
+            $this->admin->updateCheckerName($id, $name);
+        } catch (PDOException $exception) {
+            if ((string) $exception->getCode() === '23000') {
+                throw new ApiException('A checker with this name already exists.', 409, 'checker_exists');
+            }
+
+            throw $exception;
+        }
+
+        return Response::json([
+            'checker' => $this->admin->checker($id),
+        ])->withHeader('Cache-Control', 'no-store');
+    }
+
     private function requireAdmin(Request $request): User
     {
         $user = $this->users->require($request);

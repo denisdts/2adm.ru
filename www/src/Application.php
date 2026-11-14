@@ -136,6 +136,10 @@ final class Application
             '/api/v1/admin/checkers',
             static fn (Request $request): Response => $adminController->createChecker($request),
         );
+        $router->put(
+            '/api/v1/admin/checkers/{id}',
+            static fn (Request $request, array $params): Response => $adminController->updateChecker($request, $params),
+        );
         $router->get(
             '/api/v1/admin/notifications',
             static fn (Request $request): Response => $adminController->notifications($request),
