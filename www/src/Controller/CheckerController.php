@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Auth\ApiKeyGuard;
+use App\Auth\UserAuthenticator;
 use App\Config\Config;
 use App\Exception\ApiException;
 use App\Http\Request;
@@ -19,7 +20,17 @@ final class CheckerController
         private readonly ApiKeyGuard $guard,
         private readonly CheckerRepository $checkers,
         private readonly Config $config,
+        private readonly UserAuthenticator $users,
     ) {
+    }
+
+    public function index(Request $request): Response
+    {
+        $this->users->require($request);
+
+        return Response::json([
+            'checkers' => $this->checkers->allPublic(),
+        ])->withHeader('Cache-Control', 'no-store');
     }
 
     public function heartbeat(Request $request): Response

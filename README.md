@@ -106,13 +106,14 @@ docker compose \
 | Метод | Путь | Назначение |
 | --- | --- | --- |
 | `POST` | `/api/v1/metrics` | приём метрик, заголовок `X-Api-Key` |
-| `GET` | `/api/v1/metrics/{service}` | временной ряд (`name`, `from`, `to`, `step`, `limit`) |
-| `GET` | `/api/v1/metrics/{service}/latest` | последние значения из Redis |
-| `GET` | `/api/v1/services` | список сервисов с доменными/SSL-полями; `?ssl=true&domain=true` включает сбор данных чекером; требует `X-Checker-Guid` зарегистрированного чекера |
+| `GET` | `/api/v1/metrics/{service}` | временной ряд (`name`, `from`, `to`, `step`, `limit`, `checker_id`); без `checker_id` точки сгруппированы по чекерам |
+| `GET` | `/api/v1/metrics/{service}/latest` | последние значения из Redis по каждому чекеру (`checker_id`); `?checker_id=N` оставляет один чекер |
+| `GET` | `/api/v1/services` | срез сервисов для вызвавшего чекера с доменными/SSL-полями; `?ssl=true&domain=true` включает сбор данных; требует `X-Checker-Guid` зарегистрированного чекера; в ответе `shard` (`enabled`, `checker_id`, `assigned`, `total`, `checkers`) |
 | `GET` | `/api/v1/sites` | сайты компании пользователя, `Authorization: Bearer <token>` |
 | `POST` | `/api/v1/sites` | добавить сайт компании, JSON `{url, name}`, Bearer-токен |
 | `PUT` | `/api/v1/sites/{slug}/metadata` | доменные и SSL-данные сайта от чекера, `X-Api-Key` |
 | `POST` | `/api/v1/checkers/heartbeat` | heartbeat чекера, `X-Api-Key` |
+| `GET` | `/api/v1/checkers` | список чекеров для панели (`id`, `name`), Bearer-токен |
 | `GET` | `/api/v1/admin/users` | пользователи, Bearer администратора |
 | `GET` | `/api/v1/admin/companies` | компании, Bearer администратора |
 | `GET` | `/api/v1/admin/sites` | сайты, Bearer администратора |
@@ -121,7 +122,7 @@ docker compose \
 | `GET` | `/api/v1/admin/notifications` | уведомления, Bearer администратора |
 | `POST` | `/api/v1/admin/administrators` | создать администратора |
 | `GET` | `/api/v1/sites/{slug}` | данные сайта из MySQL: домен, SSL, дата добавления |
-| `GET` | `/api/v1/sites/{slug}/history` | история метрик сайта из ClickHouse (по умолчанию 200 записей, `limit` до 500) |
+| `GET` | `/api/v1/sites/{slug}/history` | история метрик сайта из ClickHouse (по умолчанию 200 записей, `limit` до 500, `checker_id` — фильтр по чекеру) |
 | `GET` | `/api/v1/health` | состояние хранилищ |
 | `POST` | `/api/v1/auth/login` | вход в панель, JSON `{email, password}` → bearer-токен |
 | `POST` | `/api/v1/auth/register` | регистрация, JSON `{name, company, email, password}` → bearer-токен и созданная компания |
@@ -129,6 +130,12 @@ docker compose \
 | `POST` | `/api/v1/auth/logout` | выход, отзывает токен |
 
 Все запросы чекера (`/api/v1/services`, `/api/v1/metrics`, `/api/v1/sites/{slug}/metadata`, `/api/v1/checkers/heartbeat`) несут заголовок `X-Checker-Guid` с UUID инстанса. API хранит его в `checkers.guid`, обновляет `checkers.last_seen_at` и `checkers.ip` (IP источника запроса, с учётом `APP_TRUSTED_PROXIES`) на каждом запросе, записывает `checker_id` в строки метрик ClickHouse и `services.last_checker_id` / `last_checked_at` при обновлении метаданных. `GET /api/v1/services` отдаётся только при наличии заголовка с GUID зарегистрированного чекера (иначе `401`). Для heartbeat без заголовка API сгенерирует GUID и вернёт его в ответе.
+
+### Шардирование чекеров
+
+`GET /api/v1/services` возвращает чекеру только его срез сайтов. Распределение считается на стороне API по rendezvous hashing: владелец сайта — живой чекер с максимальным `sha256(guid + ":" + slug)`. Живым считается чекер, у которого `checkers.last_seen_at` не старше `CHECKER_ALIVE_WINDOW` секунд; текущий чекер включается всегда. При добавлении или остановке чекера перемещаются только сайты, которыми он владел, остальные сохраняют прежнего владельца. Срез пересчитывается на каждом цикле, поэтому чекер не нужно перезапускать после изменения состава.
+
+Переменные: `CHECKER_SHARDING_ENABLED` (по умолчанию `true`; `false` — отдать всем чекерам полный список для быстрого отката) и `CHECKER_ALIVE_WINDOW` (по умолчанию `300` секунд; должен быть больше `CHECK_INTERVAL` и максимальной длительности цикла проверки). Чекеру обновление не требуется: протокол и формат ответа обратно совместимы, новые поля `shard` старые версии игнорируют.
 
 Данные страницы сайта `/dash/site/{slug}`:
 

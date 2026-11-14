@@ -59,7 +59,7 @@ final class MetricsController
 
         return Response::json([
             'service' => $service,
-            'metrics' => $this->metrics->latest($service),
+            'metrics' => $this->metrics->latest($service, $request->query),
         ]);
     }
 }

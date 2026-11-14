@@ -12,6 +12,7 @@ use App\Http\Response;
 use App\Repository\CheckerRepository;
 use App\Repository\ServiceRepository;
 use App\Support\CheckerGuid;
+use App\Support\CheckerShard;
 use App\Support\ClientIp;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -30,13 +31,30 @@ final class ServiceController
     public function index(Request $request): Response
     {
         $key = $this->guard->forRead($request);
+        $checkerId = $this->requireChecker($request, $key?->id);
 
-        $this->requireChecker($request, $key?->id);
+        $services = $this->services->all();
+        $shardingEnabled = (bool) $this->config->get('monitoring.sharding_enabled', true);
+        $checkers = [];
+        $assigned = $services;
+
+        if ($shardingEnabled) {
+            $window = max(1, (int) $this->config->get('monitoring.checker_alive_window', 300));
+            $checkers = $this->checkers->alive($window, $checkerId);
+            $assigned = CheckerShard::filter($services, $checkers, $checkerId);
+        }
 
         return Response::json([
-            'services' => $this->services->all(),
+            'services' => $assigned,
             'ssl' => $this->queryBool($request->queryParam('ssl')),
             'domain' => $this->queryBool($request->queryParam('domain')),
+            'shard' => [
+                'enabled' => $shardingEnabled,
+                'checker_id' => $checkerId,
+                'assigned' => count($assigned),
+                'total' => count($services),
+                'checkers' => count($checkers),
+            ],
         ]);
     }
 

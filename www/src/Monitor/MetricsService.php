@@ -133,7 +133,9 @@ final class MetricsService
         $latestKey = 'latest:' . $service;
 
         foreach ($rows as $row) {
-            $this->redis->hashSet($latestKey, $row['name'], (string) json_encode([
+            $field = $row['checker_id'] . '|' . $row['name'];
+
+            $this->redis->hashSet($latestKey, $field, (string) json_encode([
                 'name' => $row['name'],
                 'value' => $row['value'],
                 'kind' => $row['kind'],
@@ -150,11 +152,12 @@ final class MetricsService
 
     /**
      * @param array<string, mixed> $query
-     * @return array{service: string, from: int, to: int, step: int, points: list<array{ts: string, value: float}>}
+     * @return array{service: string, from: int, to: int, step: int, checker_id: ?int, points: list<array{ts: string, value: float, checker_id: int}>}
      */
     public function series(string $service, array $query): array
     {
         $service = $this->normalizeSlug($service);
+        $checkerId = $this->queryCheckerId($query);
 
         $window = max(60, (int) $this->config->get('monitoring.default_window', 3600));
         $now = time();
@@ -183,38 +186,63 @@ final class MetricsService
             'from' => $from,
             'to' => $to,
             'step' => $step,
-            'points' => $this->metrics->series($service, $name === '' ? null : $name, $from, $to, $step, $limit),
+            'checker_id' => $checkerId,
+            'points' => $this->metrics->series(
+                $service,
+                $name === '' ? null : $name,
+                $from,
+                $to,
+                $step,
+                $limit,
+                $checkerId,
+            ),
         ];
     }
 
     /**
+     * @param array<string, mixed> $query
      * @return list<array{name: string, value: float, kind: string, labels: array<string, string>, checker_id: int, ts: string}>
      */
-    public function latest(string $service): array
+    public function latest(string $service, array $query = []): array
     {
         $service = $this->normalizeSlug($service);
+        $checkerId = $this->queryCheckerId($query);
         $hash = $this->redis->hash('latest:' . $service);
 
         ksort($hash);
 
         $items = [];
 
-        foreach ($hash as $encoded) {
+        foreach ($hash as $field => $encoded) {
             $decoded = json_decode($encoded, true);
 
             if (!is_array($decoded)) {
                 continue;
             }
 
+            $id = (int) ($decoded['checker_id'] ?? 0);
+            $name = (string) ($decoded['name'] ?? '');
+
+            // Ignore legacy entries that were not keyed by checker.
+            if ($field !== $id . '|' . $name) {
+                continue;
+            }
+
+            if ($checkerId !== null && $id !== $checkerId) {
+                continue;
+            }
+
             $items[] = [
-                'name' => (string) ($decoded['name'] ?? ''),
+                'name' => $name,
                 'value' => (float) ($decoded['value'] ?? 0.0),
                 'kind' => (string) ($decoded['kind'] ?? 'gauge'),
                 'labels' => is_array($decoded['labels'] ?? null) ? $decoded['labels'] : [],
-                'checker_id' => (int) ($decoded['checker_id'] ?? 0),
+                'checker_id' => $id,
                 'ts' => (string) ($decoded['ts'] ?? ''),
             ];
         }
+
+        usort($items, static fn (array $a, array $b): int => [$a['checker_id'], $a['name']] <=> [$b['checker_id'], $b['name']]);
 
         return $items;
     }
@@ -327,6 +355,27 @@ final class MetricsService
         }
 
         return is_scalar($value) ? (string) $value : null;
+    }
+
+    private function queryCheckerId(array $query): ?int
+    {
+        $value = $this->queryScalar($query['checker_id'] ?? null);
+
+        if ($value === null) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            throw new ValidationException('Query parameter "checker_id" must be a non-negative integer.');
+        }
+
+        return (int) $value;
     }
 
     private function queryTimestamp(mixed $value, int $default): int

@@ -24,7 +24,7 @@ final class MetricsRepository
     }
 
     /**
-     * @return list<array{ts: string, value: float}>
+     * @return list<array{ts: string, value: float, checker_id: int}>
      */
     public function series(
         string $service,
@@ -33,6 +33,7 @@ final class MetricsRepository
         int $to,
         int $step,
         int $limit,
+        ?int $checkerId = null,
     ): array {
         $params = [
             'service' => $service,
@@ -49,13 +50,18 @@ final class MetricsRepository
             $params['name'] = $name;
         }
 
+        if ($checkerId !== null) {
+            $where .= ' AND checker_id = {checker_id:UInt32}';
+            $params['checker_id'] = $checkerId;
+        }
+
         if ($step > 0) {
             $sql = sprintf(
-                'SELECT toStartOfInterval(ts, INTERVAL %d SECOND) AS ts, avg(value) AS value
+                'SELECT toStartOfInterval(ts, INTERVAL %d SECOND) AS ts, checker_id, avg(value) AS value
                    FROM metrics
                   WHERE %s
-                  GROUP BY ts
-                  ORDER BY ts ASC
+                  GROUP BY checker_id, ts
+                  ORDER BY ts ASC, checker_id ASC
                   LIMIT %d',
                 $step,
                 $where,
@@ -63,10 +69,10 @@ final class MetricsRepository
             );
         } else {
             $sql = sprintf(
-                'SELECT ts, value
+                'SELECT ts, checker_id, value
                    FROM metrics
                   WHERE %s
-                  ORDER BY ts ASC
+                  ORDER BY ts ASC, checker_id ASC
                   LIMIT %d',
                 $where,
                 $limit,
@@ -80,17 +86,26 @@ final class MetricsRepository
             $points[] = [
                 'ts' => (string) ($row['ts'] ?? ''),
                 'value' => (float) ($row['value'] ?? 0.0),
+                'checker_id' => (int) ($row['checker_id'] ?? 0),
             ];
         }
 
         return $points;
     }
 
-    public function count(string $service): int
+    public function count(string $service, ?int $checkerId = null): int
     {
+        $params = ['service' => $service];
+        $where = 'service = {service:String}';
+
+        if ($checkerId !== null) {
+            $where .= ' AND checker_id = {checker_id:UInt32}';
+            $params['checker_id'] = $checkerId;
+        }
+
         $rows = $this->clickhouse->query(
-            'SELECT count() AS total FROM metrics WHERE service = {service:String}',
-            ['service' => $service],
+            sprintf('SELECT count() AS total FROM metrics WHERE %s', $where),
+            $params,
         );
 
         return (int) ($rows[0]['total'] ?? 0);
@@ -99,22 +114,30 @@ final class MetricsRepository
     /**
      * Recent raw points for a service, newest first.
      *
-     * @return list<array{name: string, kind: string, value: float, ts: string}>
+     * @return list<array{name: string, kind: string, value: float, checker_id: int, ts: string}>
      */
-    public function history(string $service, int $limit = 100): array
+    public function history(string $service, int $limit = 100, ?int $checkerId = null): array
     {
         $limit = max(1, min(500, $limit));
+        $params = ['service' => $service];
+        $where = 'service = {service:String}';
+
+        if ($checkerId !== null) {
+            $where .= ' AND checker_id = {checker_id:UInt32}';
+            $params['checker_id'] = $checkerId;
+        }
 
         $rows = $this->clickhouse->query(
             sprintf(
-                'SELECT name, kind, value, ts
+                'SELECT name, kind, value, checker_id, ts
                    FROM metrics
-                  WHERE service = {service:String}
+                  WHERE %s
                   ORDER BY ts DESC
                   LIMIT %d',
+                $where,
                 $limit,
             ),
-            ['service' => $service],
+            $params,
         );
 
         $points = [];
@@ -124,6 +147,7 @@ final class MetricsRepository
                 'name' => (string) ($row['name'] ?? ''),
                 'kind' => (string) ($row['kind'] ?? 'gauge'),
                 'value' => (float) ($row['value'] ?? 0.0),
+                'checker_id' => (int) ($row['checker_id'] ?? 0),
                 'ts' => (string) ($row['ts'] ?? ''),
             ];
         }

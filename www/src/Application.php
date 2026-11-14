@@ -79,7 +79,7 @@ final class Application
         $adminPage = new AdminPageController();
         $authController = new AuthController($userAuthenticator);
         $adminController = new AdminController($userAuthenticator, $adminRepository, $users);
-        $checkerController = new CheckerController($guard, $checkerRepository, $this->config);
+        $checkerController = new CheckerController($guard, $checkerRepository, $this->config, $userAuthenticator);
         $metricsController = new MetricsController($metrics, $guard, $checkerRepository, $this->config);
         $serviceController = new ServiceController($services, $guard, $checkerRepository, $this->config);
         $siteController = new SiteController($services, $userAuthenticator, $metricsRepository);
@@ -116,6 +116,10 @@ final class Application
         $router->post(
             '/api/v1/checkers/heartbeat',
             static fn (Request $request): Response => $checkerController->heartbeat($request),
+        );
+        $router->get(
+            '/api/v1/checkers',
+            static fn (Request $request): Response => $checkerController->index($request),
         );
 
         $router->get('/api/v1/admin/users', static fn (Request $request): Response => $adminController->users($request));

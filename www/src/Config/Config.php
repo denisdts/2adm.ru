@@ -61,6 +61,8 @@ final class Config
             'monitoring' => [
                 'retention_days' => Env::int('METRICS_RETENTION_DAYS', 90),
                 'default_window' => Env::int('METRICS_DEFAULT_WINDOW', 3600),
+                'sharding_enabled' => Env::bool('CHECKER_SHARDING_ENABLED', true),
+                'checker_alive_window' => Env::int('CHECKER_ALIVE_WINDOW', 300),
             ],
             'auth' => [
                 'session_ttl_days' => Env::int('AUTH_SESSION_TTL_DAYS', 30),

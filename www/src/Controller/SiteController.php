@@ -122,12 +122,33 @@ final class SiteController
         $site = $this->requireSite($request, (string) ($params['slug'] ?? ''));
 
         $limit = max(1, min(500, (int) ($request->queryParam('limit', '200') ?? '200')));
+        $checkerId = $this->checkerId($request);
 
         return Response::json([
             'site' => $this->present($site),
-            'total' => $this->metrics->count((string) $site['slug']),
-            'points' => $this->metrics->history((string) $site['slug'], $limit),
+            'checker_id' => $checkerId,
+            'total' => $this->metrics->count((string) $site['slug'], $checkerId),
+            'points' => $this->metrics->history((string) $site['slug'], $limit, $checkerId),
         ])->withHeader('Cache-Control', 'no-store');
+    }
+
+    private function checkerId(Request $request): ?int
+    {
+        $value = trim((string) ($request->queryParam('checker_id', '') ?? ''));
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            throw new ApiException(
+                'Query parameter "checker_id" must be a non-negative integer.',
+                422,
+                'validation_failed',
+            );
+        }
+
+        return (int) $value;
     }
 
     /**

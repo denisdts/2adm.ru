@@ -118,8 +118,16 @@ final class SitePageController
   .info-card strong { display: block; margin-top: 4px; font-size: 20px; line-height: 1.3; word-break: break-word; }
   .info-card small { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
 
-  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
   .section-head h2 { margin: 0; font-size: 20px; }
+  .section-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .checker-select { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  .checker-select select {
+    height: 34px; padding: 0 30px 0 10px;
+    border: 1px solid var(--border); border-radius: 9px;
+    background: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+  }
+  .checker-select select:focus { outline: 2px solid rgba(37, 99, 235, .35); outline-offset: 1px; border-color: var(--accent); }
   .chart-section { margin-bottom: 34px; }
   .chart-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -142,6 +150,7 @@ final class SitePageController
   td.right, th.right { text-align: right; }
   td.value { color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
   td.time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.checker { color: var(--muted); font-size: 12px; white-space: nowrap; }
   td.name { font-weight: 500; }
   .empty { padding: 28px; text-align: center; color: var(--muted); background: var(--surface); border: 1px dashed #cbd5e1; border-radius: var(--radius); }
   .notice {
@@ -242,13 +251,22 @@ final class SitePageController
     <section>
       <div class="section-head">
         <h2>История запросов</h2>
-        <span class="muted" id="historyHint">последние 200 записей</span>
+        <div class="section-tools">
+          <label class="checker-select">
+            <span>Чекер</span>
+            <select id="checkerFilter">
+              <option value="">Все чекеры</option>
+            </select>
+          </label>
+          <span class="muted" id="historyHint">последние 200 записей</span>
+        </div>
       </div>
       <div class="table-wrap" id="historyWrap" hidden>
         <table>
           <thead>
             <tr>
               <th>Время</th>
+              <th>Чекер</th>
               <th>Метрика</th>
               <th class="right">Значение</th>
             </tr>
@@ -279,6 +297,13 @@ final class SitePageController
   var chartSeries = [];
   var chartVisible = {};
   var chartColors = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', '#0891b2', '#4d7c0f', '#be185d', '#475569', '#b45309'];
+  var checkerFilter = document.getElementById('checkerFilter');
+  var checkerNames = {};
+
+  function checkerLabel(id) {
+    if (!id) return 'Без чекера';
+    return checkerNames[id] || ('Чекер #' + id);
+  }
 
   var path = window.location.pathname.replace(/\/+$/, '');
   var slug = decodeURIComponent(path.substring(path.lastIndexOf('/') + 1));
@@ -408,6 +433,13 @@ final class SitePageController
 
   function buildSeries(points) {
     var groups = {};
+    var checkerIds = {};
+
+    points.forEach(function (point) {
+      checkerIds[String(Number(point.checker_id) || 0)] = true;
+    });
+
+    var multiChecker = Object.keys(checkerIds).length > 1;
 
     points.forEach(function (point) {
       var timestamp = parseTimestamp(point.ts);
@@ -417,11 +449,15 @@ final class SitePageController
         return;
       }
 
-      if (!groups[point.name]) {
-        groups[point.name] = [];
+      var key = multiChecker
+        ? checkerLabel(Number(point.checker_id) || 0) + ' · ' + point.name
+        : point.name;
+
+      if (!groups[key]) {
+        groups[key] = [];
       }
 
-      groups[point.name].push({ t: timestamp, value: value });
+      groups[key].push({ t: timestamp, value: value });
     });
 
     var series = Object.keys(groups).sort().map(function (name) {
@@ -710,6 +746,7 @@ final class SitePageController
     points.forEach(function (point) {
       var row = el('tr');
       row.append(el('td', 'time', formatDateTime(point.ts)));
+      row.append(el('td', 'checker', checkerLabel(Number(point.checker_id) || 0)));
       row.append(el('td', 'name', point.name));
       row.append(el('td', 'value right', formatValue(point.value)));
       body.append(row);
@@ -719,13 +756,53 @@ final class SitePageController
     document.getElementById('historyHint').textContent = 'последние ' + points.length + ' записей';
   }
 
+  function populateCheckerSelect(checkers) {
+    var selected = checkerFilter.value;
+
+    checkerFilter.replaceChildren();
+    checkerFilter.append(new Option('Все чекеры', ''));
+
+    checkers.forEach(function (checker) {
+      checkerFilter.append(new Option(checker.name || ('Чекер #' + checker.id), String(checker.id)));
+    });
+
+    var stillExists = checkers.some(function (checker) { return String(checker.id) === selected; });
+
+    if (selected !== '' && stillExists) {
+      checkerFilter.value = selected;
+    }
+  }
+
+  function loadHistory() {
+    var url = '/api/v1/sites/' + encodeURIComponent(slug) + '/history?limit=200';
+    var selected = checkerFilter.value;
+
+    if (selected !== '') {
+      url += '&checker_id=' + encodeURIComponent(selected);
+    }
+
+    return api(url).catch(function () { return null; });
+  }
+
   function loadSite() {
     Promise.all([
       api('/api/v1/sites/' + encodeURIComponent(slug)),
-      api('/api/v1/sites/' + encodeURIComponent(slug) + '/history?limit=200').catch(function () { return null; })
+      api('/api/v1/checkers').catch(function () { return { checkers: [] }; })
     ]).then(function (results) {
       renderSite(results[0].site);
-      renderHistory(results[1]);
+
+      checkerNames = {};
+      var checkers = results[1].checkers || [];
+
+      checkers.forEach(function (checker) {
+        checkerNames[checker.id] = checker.name;
+      });
+
+      populateCheckerSelect(checkers);
+
+      return loadHistory();
+    }).then(function (history) {
+      renderHistory(history);
       gate.hidden = true;
     }).catch(function (error) {
       if (error.status === 401) {
@@ -760,6 +837,10 @@ final class SitePageController
 
   document.getElementById('logoutBtn').addEventListener('click', function () {
     api('/api/v1/auth/logout', { method: 'POST' }).then(leave, leave);
+  });
+
+  checkerFilter.addEventListener('change', function () {
+    loadHistory().then(renderHistory);
   });
 
   if (readToken() === null) {

@@ -135,6 +135,11 @@ final class DashController
   tr:first-child td { border-top: 0; }
   td.value { color: var(--accent); text-align: right; font-variant-numeric: tabular-nums; }
   td.time { padding-left: 12px; color: var(--muted); font-size: 12px; text-align: right; }
+  .checker-group td {
+    padding: 12px 0 4px; border-top: 0; color: var(--muted);
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .checker-group:first-child td { padding-top: 0; }
   .labels { display: block; color: var(--muted); font-size: 11px; }
   .empty { color: var(--muted); font-size: 14px; }
   .empty-card { border: 1px dashed #cbd5e1; border-radius: var(--radius); padding: 28px; text-align: center; color: var(--muted); background: var(--surface); }
@@ -271,6 +276,12 @@ final class DashController
   var siteUrlInput = siteForm.querySelector('input[name="url"]');
   var toast = document.getElementById('toast');
   var toastTimer = null;
+  var checkerNames = {};
+
+  function checkerLabel(id) {
+    if (!id) return 'Без чекера';
+    return checkerNames[id] || ('Чекер #' + id);
+  }
 
   function readToken() {
     try {
@@ -413,7 +424,11 @@ final class DashController
     name.href = siteUrl;
     title.append(name);
     title.append(el('div', 'site-slug', item.service.slug));
-    head.append(title, el('span', 'count', item.metrics.length + ' метрик'));
+
+    var metricNames = {};
+    item.metrics.forEach(function (metric) { metricNames[metric.name] = true; });
+
+    head.append(title, el('span', 'count', Object.keys(metricNames).length + ' метрик'));
     card.append(head);
 
     if (!item.metrics.length) {
@@ -421,17 +436,39 @@ final class DashController
       return card;
     }
 
+    var metrics = item.metrics || [];
+    var checkerIds = {};
+    metrics.forEach(function (metric) { checkerIds[Number(metric.checker_id) || 0] = true; });
+    var multiChecker = Object.keys(checkerIds).length > 1;
+
     var table = el('table');
-    item.metrics.forEach(function (metric) {
-      var row = el('tr');
-      var name = el('td');
-      name.append(document.createTextNode(metric.name));
-      var labels = formatLabels(metric.labels);
-      if (labels !== '') name.append(el('span', 'labels', labels));
-      row.append(name);
-      row.append(el('td', 'value', formatValue(metric.value)));
-      row.append(el('td', 'time', (metric.ts || '').slice(11, 19)));
-      table.append(row);
+    var groups = {};
+    metrics.forEach(function (metric) {
+      var key = String(Number(metric.checker_id) || 0);
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(metric);
+    });
+
+    Object.keys(groups).sort(function (a, b) { return Number(a) - Number(b); }).forEach(function (key) {
+      if (multiChecker) {
+        var groupRow = el('tr', 'checker-group');
+        var groupCell = el('td', '', checkerLabel(Number(key)));
+        groupCell.colSpan = 3;
+        groupRow.append(groupCell);
+        table.append(groupRow);
+      }
+
+      groups[key].forEach(function (metric) {
+        var row = el('tr');
+        var metricName = el('td');
+        metricName.append(document.createTextNode(metric.name));
+        var labels = formatLabels(metric.labels);
+        if (labels !== '') metricName.append(el('span', 'labels', labels));
+        row.append(metricName);
+        row.append(el('td', 'value', formatValue(metric.value)));
+        row.append(el('td', 'time', (metric.ts || '').slice(11, 19)));
+        table.append(row);
+      });
     });
     card.append(table);
     return card;
@@ -462,9 +499,15 @@ final class DashController
       api('/api/v1/sites').catch(function (error) {
         if (error.status === 401) leave();
         return { sites: [] };
-      })
+      }),
+      api('/api/v1/checkers').catch(function () { return { checkers: [] }; })
     ]).then(function (results) {
       setHealth(results[0]);
+
+      checkerNames = {};
+      (results[2].checkers || []).forEach(function (checker) {
+        checkerNames[checker.id] = checker.name;
+      });
 
       var sites = results[1].sites || [];
       document.getElementById('statSites').textContent = String(sites.length);
@@ -476,7 +519,9 @@ final class DashController
       }));
     }).then(function (items) {
       var metricCount = items.reduce(function (total, item) {
-        return total + item.metrics.length;
+        var names = {};
+        item.metrics.forEach(function (metric) { names[metric.name] = true; });
+        return total + Object.keys(names).length;
       }, 0);
 
       renderCards(items);
