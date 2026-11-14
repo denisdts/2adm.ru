@@ -65,7 +65,7 @@ final class AdminRepository
     public function checkers(): array
     {
         $rows = $this->db->fetchAll(
-            'SELECT k.id, k.guid, k.name, k.host, k.version, k.api_key_id, k.bash_command,
+            'SELECT k.id, k.guid, k.ip, k.name, k.host, k.version, k.api_key_id, k.bash_command,
                     a.name AS api_key_name, k.last_seen_at, k.created_at,
                     (k.last_seen_at IS NOT NULL AND k.last_seen_at >= DATE_SUB(NOW(), INTERVAL 2 MINUTE)) AS online
                FROM checkers k
@@ -113,7 +113,7 @@ final class AdminRepository
     public function checker(int $id): ?array
     {
         $row = $this->db->fetchOne(
-            'SELECT k.id, k.guid, k.name, k.host, k.version, k.api_key_id, k.bash_command,
+            'SELECT k.id, k.guid, k.ip, k.name, k.host, k.version, k.api_key_id, k.bash_command,
                     a.name AS api_key_name, k.last_seen_at, k.created_at,
                     (k.last_seen_at IS NOT NULL AND k.last_seen_at >= DATE_SUB(NOW(), INTERVAL 2 MINUTE)) AS online
                FROM checkers k

@@ -172,6 +172,7 @@ final class MySqlMigrator
         $this->db->pdo()->exec('ALTER TABLE checkers MODIFY COLUMN last_seen_at DATETIME NULL');
         $this->addColumn('checkers', 'bash_command', 'TEXT NULL');
         $this->addColumn('checkers', 'guid', 'CHAR(36) NULL AFTER id');
+        $this->addColumn('checkers', 'ip', 'VARCHAR(45) NULL AFTER guid');
 
         if (!$this->indexExists('checkers', 'uniq_checkers_guid')) {
             $this->db->pdo()->exec('ALTER TABLE checkers ADD UNIQUE KEY uniq_checkers_guid (guid)');

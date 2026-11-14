@@ -5,17 +5,20 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Auth\ApiKeyGuard;
+use App\Config\Config;
 use App\Exception\ApiException;
 use App\Http\Request;
 use App\Http\Response;
 use App\Repository\CheckerRepository;
 use App\Support\CheckerGuid;
+use App\Support\ClientIp;
 
 final class CheckerController
 {
     public function __construct(
         private readonly ApiKeyGuard $guard,
         private readonly CheckerRepository $checkers,
+        private readonly Config $config,
     ) {
     }
 
@@ -37,11 +40,14 @@ final class CheckerController
             ?? (is_string($rawGuid) ? CheckerGuid::normalize($rawGuid) : null)
             ?? CheckerGuid::generate();
 
+        $ip = ClientIp::fromRequest($this->config, $request);
+
         $id = $this->checkers->heartbeat(
             $guid,
             $name,
             $host === '' ? null : mb_substr($host, 0, 190),
             $version === '' ? null : mb_substr($version, 0, 32),
+            $ip === '' ? null : $ip,
             $key->id,
         );
 

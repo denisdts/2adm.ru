@@ -79,9 +79,9 @@ final class Application
         $adminPage = new AdminPageController();
         $authController = new AuthController($userAuthenticator);
         $adminController = new AdminController($userAuthenticator, $adminRepository, $users);
-        $checkerController = new CheckerController($guard, $checkerRepository);
-        $metricsController = new MetricsController($metrics, $guard, $checkerRepository);
-        $serviceController = new ServiceController($services, $guard, $checkerRepository);
+        $checkerController = new CheckerController($guard, $checkerRepository, $this->config);
+        $metricsController = new MetricsController($metrics, $guard, $checkerRepository, $this->config);
+        $serviceController = new ServiceController($services, $guard, $checkerRepository, $this->config);
         $siteController = new SiteController($services, $userAuthenticator, $metricsRepository);
 
         $router = $this->router;

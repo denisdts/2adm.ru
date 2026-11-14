@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Auth\ApiKeyGuard;
+use App\Config\Config;
 use App\Exception\ApiException;
 use App\Http\Request;
 use App\Http\Response;
 use App\Repository\CheckerRepository;
 use App\Repository\ServiceRepository;
 use App\Support\CheckerGuid;
+use App\Support\ClientIp;
 use DateTimeImmutable;
 use DateTimeZone;
 use Exception;
@@ -21,6 +23,7 @@ final class ServiceController
         private readonly ServiceRepository $services,
         private readonly ApiKeyGuard $guard,
         private readonly CheckerRepository $checkers,
+        private readonly Config $config,
     ) {
     }
 
@@ -127,7 +130,7 @@ final class ServiceController
             );
         }
 
-        $checkerId = $this->checkers->touch($guid, $apiKeyId);
+        $checkerId = $this->checkers->touch($guid, $apiKeyId, $this->checkerIp($request));
 
         if ($checkerId === null) {
             throw new ApiException(
@@ -144,7 +147,14 @@ final class ServiceController
     {
         $guid = CheckerGuid::fromRequest($request);
 
-        return $guid === null ? null : $this->checkers->touch($guid, $apiKeyId);
+        return $guid === null ? null : $this->checkers->touch($guid, $apiKeyId, $this->checkerIp($request));
+    }
+
+    private function checkerIp(Request $request): ?string
+    {
+        $ip = ClientIp::fromRequest($this->config, $request);
+
+        return $ip === '' ? null : $ip;
     }
 
     private function parseDate(mixed $value, string $field): ?string

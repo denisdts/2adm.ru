@@ -370,7 +370,7 @@ final class AdminPageController
               <th class="col-id">ID</th>
               <th class="col-status">Статус</th>
               <th>Чекер</th>
-              <th class="col-meta">Хост / версия</th>
+              <th class="col-meta">Хост / IP / версия</th>
               <th class="col-key">Ключ</th>
               <th class="col-seen">Активность</th>
               <th class="right col-actions" aria-label="Настройки"></th>
@@ -644,6 +644,9 @@ final class AdminPageController
 
       var metaCell = el('td', 'checker-meta');
       metaCell.append(el('div', '', checker.host || '—'));
+      var ipLine = el('div', '', checker.ip || '—');
+      ipLine.title = checker.ip || '';
+      metaCell.append(ipLine);
       metaCell.append(el('div', '', checker.version ? 'v' + checker.version : '—'));
       row.append(metaCell);
 
@@ -819,6 +822,7 @@ final class AdminPageController
     addCheckerInfoRow('Название', checker.name || '—');
     addCheckerInfoRow('Статус', status);
     addCheckerInfoRow('Хост', checker.host || '—');
+    addCheckerInfoRow('IP-адрес', checker.ip || '—');
     addCheckerInfoRow('Версия', checker.version || '—');
     addCheckerInfoRow('API-ключ', checker.api_key_name || '—');
     addCheckerInfoRow('Bash-команда', checker.bash_command || '—');

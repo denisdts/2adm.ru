@@ -128,7 +128,7 @@ docker compose \
 | `GET` | `/api/v1/auth/me` | текущий пользователь, заголовок `Authorization: Bearer <token>` |
 | `POST` | `/api/v1/auth/logout` | выход, отзывает токен |
 
-Все запросы чекера (`/api/v1/services`, `/api/v1/metrics`, `/api/v1/sites/{slug}/metadata`, `/api/v1/checkers/heartbeat`) несут заголовок `X-Checker-Guid` с UUID инстанса. API хранит его в `checkers.guid`, обновляет `checkers.last_seen_at` на каждом запросе, записывает `checker_id` в строки метрик ClickHouse и `services.last_checker_id` / `last_checked_at` при обновлении метаданных. `GET /api/v1/services` отдаётся только при наличии заголовка с GUID зарегистрированного чекера (иначе `401`). Для heartbeat без заголовка API сгенерирует GUID и вернёт его в ответе.
+Все запросы чекера (`/api/v1/services`, `/api/v1/metrics`, `/api/v1/sites/{slug}/metadata`, `/api/v1/checkers/heartbeat`) несут заголовок `X-Checker-Guid` с UUID инстанса. API хранит его в `checkers.guid`, обновляет `checkers.last_seen_at` и `checkers.ip` (IP источника запроса, с учётом `APP_TRUSTED_PROXIES`) на каждом запросе, записывает `checker_id` в строки метрик ClickHouse и `services.last_checker_id` / `last_checked_at` при обновлении метаданных. `GET /api/v1/services` отдаётся только при наличии заголовка с GUID зарегистрированного чекера (иначе `401`). Для heartbeat без заголовка API сгенерирует GUID и вернёт его в ответе.
 
 Данные страницы сайта `/dash/site/{slug}`:
 

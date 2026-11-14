@@ -13,15 +13,22 @@ final class CheckerRepository
     {
     }
 
-    public function heartbeat(string $guid, string $name, ?string $host, ?string $version, ?int $apiKeyId): int
-    {
+    public function heartbeat(
+        string $guid,
+        string $name,
+        ?string $host,
+        ?string $version,
+        ?string $ip,
+        ?int $apiKeyId,
+    ): int {
         $this->db->execute(
-            'INSERT INTO checkers (guid, name, host, version, api_key_id, last_seen_at)
-             VALUES (:guid, :name, :host, :version, :api_key_id, NOW()) AS new
+            'INSERT INTO checkers (guid, name, host, version, ip, api_key_id, last_seen_at)
+             VALUES (:guid, :name, :host, :version, :ip, :api_key_id, NOW()) AS new
              ON DUPLICATE KEY UPDATE
                 guid = IF(checkers.guid IS NULL, new.guid, checkers.guid),
                 host = new.host,
                 version = new.version,
+                ip = new.ip,
                 api_key_id = new.api_key_id,
                 last_seen_at = NOW()',
             [
@@ -29,6 +36,7 @@ final class CheckerRepository
                 'name' => $name,
                 'host' => $host,
                 'version' => $version,
+                'ip' => $ip,
                 'api_key_id' => $apiKeyId,
             ],
         );
@@ -48,7 +56,7 @@ final class CheckerRepository
      * Returns the checker id, or null when the guid is unknown (the checker
      * has not sent a heartbeat yet).
      */
-    public function touch(string $guid, ?int $apiKeyId): ?int
+    public function touch(string $guid, ?int $apiKeyId, ?string $ip = null): ?int
     {
         $id = $this->findIdByGuid($guid);
 
@@ -59,9 +67,11 @@ final class CheckerRepository
         $this->db->execute(
             'UPDATE checkers
                 SET last_seen_at = NOW(),
+                    ip = COALESCE(:ip, ip),
                     api_key_id = COALESCE(:api_key_id, api_key_id)
               WHERE id = :id',
             [
+                'ip' => $ip,
                 'api_key_id' => $apiKeyId,
                 'id' => $id,
             ],
