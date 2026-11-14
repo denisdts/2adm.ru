@@ -5,7 +5,7 @@ APP="2adm-checker"
 SERVICE_NAME="2adm-checker"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 DEFAULT_PREFIX="/opt/2adm-checker"
-RUN_USER="2adm-checker"
+RUN_USER="adm-checker"
 
 BIN=""
 CONFIG=""
@@ -147,13 +147,20 @@ if [ -z "$CONFIG" ]; then
 fi
 
 ensure_user() {
-	id "$RUN_USER" >/dev/null 2>&1 && return
+	if id -u "$RUN_USER" >/dev/null 2>&1; then
+		return 0
+	fi
+
 	if command -v useradd >/dev/null 2>&1; then
 		useradd --system --user-group --no-create-home --shell "$(command -v nologin || echo /bin/false)" "$RUN_USER"
 	elif command -v adduser >/dev/null 2>&1; then
 		adduser -S -D -H -s "$(command -v nologin || echo /bin/false)" "$RUN_USER"
 	else
 		die "cannot create system user $RUN_USER (no useradd/adduser)"
+	fi
+
+	if ! id -u "$RUN_USER" >/dev/null 2>&1; then
+		die "failed to create system user $RUN_USER"
 	fi
 }
 
@@ -202,7 +209,6 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$RUN_USER
-Group=$RUN_USER
 WorkingDirectory=$PREFIX
 ExecStart=$PREFIX/$APP
 Restart=always
