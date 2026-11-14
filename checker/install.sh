@@ -221,7 +221,6 @@ PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictSUIDSGID=true
 LockPersonality=true
 
 [Install]
