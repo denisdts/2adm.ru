@@ -177,6 +177,8 @@ final class AdminPageController
   .info-grid dt { color: var(--muted); font-size: 13px; font-weight: 600; }
   .info-grid dd { margin: 0; font-size: 14px; word-break: break-word; }
   .info-grid dd code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .install-section { margin-top: 22px; }
+  .install-section h3 { margin: 0 0 10px; font-size: 16px; }
 
   .checkers-table { table-layout: fixed; }
   .checkers-card { overflow-x: hidden; }
@@ -214,6 +216,7 @@ final class AdminPageController
   }
   .modal-dialog h2 { margin: 0 0 6px; font-size: 22px; }
   .modal-dialog .sub { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+  .modal-dialog.scrollable { max-height: calc(100vh - 40px); overflow-y: auto; }
   .modal-close {
     position: absolute; top: 12px; right: 12px; width: 34px; height: 34px;
     border: 0; border-radius: 9px; background: transparent; color: var(--muted);
@@ -441,11 +444,19 @@ final class AdminPageController
 
 <div class="modal" id="checkerInfoModal" hidden>
   <div class="modal-backdrop" data-close-checker-info></div>
-  <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="checkerInfoTitle">
+  <div class="modal-dialog scrollable" role="dialog" aria-modal="true" aria-labelledby="checkerInfoTitle">
     <button class="modal-close" type="button" data-close-checker-info aria-label="Закрыть">&times;</button>
     <h2 id="checkerInfoTitle">Информация о чекере</h2>
     <p class="sub">Данные чекера из базы.</p>
     <dl class="info-grid" id="checkerInfoBody"></dl>
+    <div class="install-section">
+      <h3>Установка на новом сервере</h3>
+      <pre class="code-block" id="checkerInfoInstallCode"></pre>
+      <p class="form-note" id="checkerInfoInstallHint"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" id="checkerInfoInstallCopy">Скопировать</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -473,6 +484,9 @@ final class AdminPageController
   var checkerInstallHint = document.getElementById('checkerInstallHint');
   var checkerInstallCopy = document.getElementById('checkerInstallCopy');
   var checkerInstallDone = document.getElementById('checkerInstallDone');
+  var checkerInfoInstallCode = document.getElementById('checkerInfoInstallCode');
+  var checkerInfoInstallHint = document.getElementById('checkerInfoInstallHint');
+  var checkerInfoInstallCopy = document.getElementById('checkerInfoInstallCopy');
 
   function readToken() {
     try {
@@ -801,6 +815,8 @@ final class AdminPageController
       hex.slice(16, 20) + '-' + hex.slice(20);
   }
 
+  var INSTALL_HINT = 'MONITOR_API_KEY — существующий глобальный API-ключ чекера. Если ключа нет, создайте его на сервере приложения.';
+
   function checkerInstallScript(checker) {
     var base = window.location.origin;
     var guid = checker.guid || '';
@@ -832,7 +848,7 @@ final class AdminPageController
     checkerSub.textContent = 'Выполните шаги на новом сервере.';
     checkerForm.hidden = true;
     checkerInstallCode.textContent = checkerInstallScript(checker);
-    checkerInstallHint.textContent = 'MONITOR_API_KEY — существующий глобальный API-ключ чекера. Если ключа нет, создайте его на сервере приложения.';
+    checkerInstallHint.textContent = INSTALL_HINT;
     checkerInstallCopy.textContent = 'Скопировать';
     checkerInstall.hidden = false;
   }
@@ -859,6 +875,15 @@ final class AdminPageController
     }
 
     fallbackCopy(text, onDone);
+  }
+
+  function bindCopyButton(button, codeNode) {
+    button.addEventListener('click', function () {
+      copyText(codeNode.textContent || '', function () {
+        button.textContent = 'Скопировано';
+        window.setTimeout(function () { button.textContent = 'Скопировать'; }, 1500);
+      });
+    });
   }
 
   function openCheckerModal() {
@@ -920,6 +945,10 @@ final class AdminPageController
     addCheckerInfoRow('Последняя активность', formatDateTime(checker.last_seen_at));
     addCheckerInfoRow('Создан', formatDateTime(checker.created_at));
 
+    checkerInfoInstallCode.textContent = checkerInstallScript(checker);
+    checkerInfoInstallHint.textContent = INSTALL_HINT;
+    checkerInfoInstallCopy.textContent = 'Скопировать';
+
     checkerInfoModal.hidden = false;
     document.body.classList.add('modal-open');
   }
@@ -956,12 +985,8 @@ final class AdminPageController
   });
 
   checkerInstallDone.addEventListener('click', closeCheckerModal);
-  checkerInstallCopy.addEventListener('click', function () {
-    copyText(checkerInstallCode.textContent || '', function () {
-      checkerInstallCopy.textContent = 'Скопировано';
-      window.setTimeout(function () { checkerInstallCopy.textContent = 'Скопировать'; }, 1500);
-    });
-  });
+  bindCopyButton(checkerInstallCopy, checkerInstallCode);
+  bindCopyButton(checkerInfoInstallCopy, checkerInfoInstallCode);
 
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') {
