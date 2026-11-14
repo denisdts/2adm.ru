@@ -211,6 +211,8 @@ VERSION=1.0.0 ./build.sh
 # артефакты: checker/dist/
 ```
 
+Готовый архив linux/amd64 также доступен в корне сайта: `https://2adm.ru/2adm-checker_linux_amd64.tar.gz` (внутри бинарник, `checker.env.example` и `install.sh`).
+
 На сервер копируются `2adm-checker_linux_<arch>`, `checker.env.example` и `install.sh`:
 
 ```sh
