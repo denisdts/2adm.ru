@@ -349,6 +349,21 @@ final class DashController
     return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
   }
 
+  function formatMetricTime(value) {
+    var text = String(value || '');
+
+    if (text === '') return '';
+
+    var normalized = text.indexOf('T') === -1 ? text.replace(' ', 'T') + 'Z' : text;
+    var date = new Date(normalized);
+
+    if (isNaN(date.getTime())) return text.slice(11, 19);
+
+    return date.toLocaleTimeString('ru-RU', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+  }
+
   function setSiteNote(message, isError) {
     siteNote.textContent = message;
     siteNote.className = 'form-note' + (isError ? ' error' : '');
@@ -466,7 +481,7 @@ final class DashController
         if (labels !== '') metricName.append(el('span', 'labels', labels));
         row.append(metricName);
         row.append(el('td', 'value', formatValue(metric.value)));
-        row.append(el('td', 'time', (metric.ts || '').slice(11, 19)));
+        row.append(el('td', 'time', formatMetricTime(metric.ts)));
         table.append(row);
       });
     });

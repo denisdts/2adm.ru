@@ -582,9 +582,11 @@ final class AdminPageController
   function formatDateTime(value) {
     if (!value) return '—';
 
-    var date = new Date(String(value).replace(' ', 'T'));
+    var text = String(value);
+    var normalized = text.indexOf('T') === -1 ? text.replace(' ', 'T') + 'Z' : text;
+    var date = new Date(normalized);
 
-    if (isNaN(date.getTime())) return String(value);
+    if (isNaN(date.getTime())) return text;
 
     return date.toLocaleString('ru-RU', {
       day: '2-digit', month: '2-digit', year: 'numeric',
