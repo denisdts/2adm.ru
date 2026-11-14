@@ -8,6 +8,7 @@ use App\Migration\ClickHouseMigrator;
 use App\Migration\MySqlMigrator;
 use App\Repository\ApiKeyRepository;
 use App\Repository\ServiceRepository;
+use App\Repository\UserRepository;
 use App\Storage\ClickHouse\ClickHouseClient;
 use App\Storage\MySql\MySqlConnection;
 use App\Storage\Redis\RedisClient;
@@ -50,6 +51,7 @@ $redis = new RedisClient(section($config, 'redis'));
 
 $serviceRepository = new ServiceRepository($mysql);
 $apiKeyRepository = new ApiKeyRepository($mysql);
+$userRepository = new UserRepository($mysql);
 
 $command = $argv[1] ?? 'help';
 
@@ -159,6 +161,73 @@ try {
             }
             break;
 
+        case 'user:create':
+            $positional = [];
+            $password = null;
+            $company = null;
+
+            foreach (array_slice($argv, 2) as $argument) {
+                if (str_starts_with($argument, '--password=')) {
+                    $password = substr($argument, strlen('--password='));
+                    continue;
+                }
+
+                if (str_starts_with($argument, '--company=')) {
+                    $company = substr($argument, strlen('--company='));
+                    continue;
+                }
+
+                if (str_starts_with($argument, '--')) {
+                    fail(sprintf('unknown argument "%s"', $argument));
+                }
+
+                $positional[] = $argument;
+            }
+
+            $email = strtolower(trim((string) ($positional[0] ?? '')));
+            $name = trim((string) ($positional[1] ?? ''));
+
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                fail('usage: user:create <email> [name] [--company=<name>] [--password=<password>]');
+            }
+
+            if ($name === '') {
+                $name = (string) strstr($email, '@', true);
+            }
+
+            if ($company === null || trim($company) === '') {
+                $company = $name;
+            }
+
+            $company = mb_substr(trim($company), 0, 128);
+
+            if ($password === null) {
+                fwrite(STDOUT, 'Password: ');
+                $password = trim((string) fgets(STDIN));
+            }
+
+            if (strlen($password) < 8) {
+                fail('password must be at least 8 characters');
+            }
+
+            if ($userRepository->findByEmail($email) !== null) {
+                fail(sprintf('user "%s" already exists', $email));
+            }
+
+            $created = $userRepository->createWithCompany(
+                $email,
+                $name,
+                password_hash($password, PASSWORD_DEFAULT),
+                $company,
+            );
+            line(sprintf(
+                'user "%s" created (id=%d, company_id=%d)',
+                $email,
+                $created['user_id'],
+                $created['company_id'],
+            ));
+            break;
+
         case 'health':
             line(sprintf('mysql:      %s', $mysql->ping() ? 'ok' : 'down'));
             line(sprintf('clickhouse: %s', $clickhouse->ping() ? 'ok' : 'down'));
@@ -172,6 +241,8 @@ try {
             line('  service:create <slug> [name]         register a monitored service');
             line('  api-key:create <name> --service=<slug> | --global');
             line('  api-key:list                         list active API keys');
+            line('  user:create <email> [name] [--company=<name>] [--password=<password>]');
+            line('                                       create a dashboard user and company');
             line('  health                               check backend connectivity');
             break;
     }

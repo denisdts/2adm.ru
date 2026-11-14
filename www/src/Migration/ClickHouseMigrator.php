@@ -45,6 +45,7 @@ final class ClickHouseMigrator
                 kind LowCardinality(String) DEFAULT 'gauge',
                 value Float64,
                 labels Map(String, String),
+                checker_id UInt32 DEFAULT 0,
                 ts DateTime64(3, 'UTC'),
                 ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)
             )
@@ -56,6 +57,11 @@ final class ClickHouseMigrator
             SQL,
             $database,
             $retentionDays,
+        ));
+
+        $this->clickhouse->command(sprintf(
+            'ALTER TABLE `%s`.`metrics` ADD COLUMN IF NOT EXISTS checker_id UInt32 DEFAULT 0',
+            $database,
         ));
     }
 }

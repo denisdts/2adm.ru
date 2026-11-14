@@ -62,6 +62,12 @@ final class Config
                 'retention_days' => Env::int('METRICS_RETENTION_DAYS', 90),
                 'default_window' => Env::int('METRICS_DEFAULT_WINDOW', 3600),
             ],
+            'auth' => [
+                'session_ttl_days' => Env::int('AUTH_SESSION_TTL_DAYS', 30),
+                'login_max_attempts' => Env::int('AUTH_LOGIN_MAX_ATTEMPTS', 10),
+                'register_max_attempts' => Env::int('AUTH_REGISTER_MAX_ATTEMPTS', 5),
+                'login_window_seconds' => Env::int('AUTH_LOGIN_WINDOW', 300),
+            ],
         ]);
     }
 

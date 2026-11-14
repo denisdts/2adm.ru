@@ -95,4 +95,39 @@ final class MetricsRepository
 
         return (int) ($rows[0]['total'] ?? 0);
     }
+
+    /**
+     * Recent raw points for a service, newest first.
+     *
+     * @return list<array{name: string, kind: string, value: float, ts: string}>
+     */
+    public function history(string $service, int $limit = 100): array
+    {
+        $limit = max(1, min(500, $limit));
+
+        $rows = $this->clickhouse->query(
+            sprintf(
+                'SELECT name, kind, value, ts
+                   FROM metrics
+                  WHERE service = {service:String}
+                  ORDER BY ts DESC
+                  LIMIT %d',
+                $limit,
+            ),
+            ['service' => $service],
+        );
+
+        $points = [];
+
+        foreach ($rows as $row) {
+            $points[] = [
+                'name' => (string) ($row['name'] ?? ''),
+                'kind' => (string) ($row['kind'] ?? 'gauge'),
+                'value' => (float) ($row['value'] ?? 0.0),
+                'ts' => (string) ($row['ts'] ?? ''),
+            ];
+        }
+
+        return $points;
+    }
 }

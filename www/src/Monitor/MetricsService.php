@@ -38,7 +38,7 @@ final class MetricsService
     /**
      * @param array<string, mixed> $payload
      */
-    public function ingest(ApiKey $key, array $payload): int
+    public function ingest(ApiKey $key, array $payload, ?int $checkerId = null): int
     {
         $service = trim($this->queryScalar($payload['service'] ?? null) ?? '');
 
@@ -115,12 +115,15 @@ final class MetricsService
                 ));
             }
 
+            $labels = $this->normalizeLabels($metric['labels'] ?? [], $index);
+
             $rows[] = [
                 'service' => $service,
                 'name' => $name,
                 'kind' => $kind,
                 'value' => $value,
-                'labels' => $this->normalizeLabels($metric['labels'] ?? [], $index),
+                'labels' => $labels === [] ? new \stdClass() : $labels,
+                'checker_id' => $checkerId ?? 0,
                 'ts' => $this->normalizeTimestamp($metric['ts'] ?? $metric['timestamp'] ?? null),
             ];
         }
@@ -135,6 +138,7 @@ final class MetricsService
                 'value' => $row['value'],
                 'kind' => $row['kind'],
                 'labels' => $row['labels'],
+                'checker_id' => $row['checker_id'],
                 'ts' => $row['ts'],
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         }
@@ -184,7 +188,7 @@ final class MetricsService
     }
 
     /**
-     * @return list<array{name: string, value: float, kind: string, labels: array<string, string>, ts: string}>
+     * @return list<array{name: string, value: float, kind: string, labels: array<string, string>, checker_id: int, ts: string}>
      */
     public function latest(string $service): array
     {
@@ -207,6 +211,7 @@ final class MetricsService
                 'value' => (float) ($decoded['value'] ?? 0.0),
                 'kind' => (string) ($decoded['kind'] ?? 'gauge'),
                 'labels' => is_array($decoded['labels'] ?? null) ? $decoded['labels'] : [],
+                'checker_id' => (int) ($decoded['checker_id'] ?? 0),
                 'ts' => (string) ($decoded['ts'] ?? ''),
             ];
         }

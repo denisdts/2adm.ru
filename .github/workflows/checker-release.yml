@@ -1,0 +1,50 @@
+name: Checker release
+
+on:
+  push:
+    tags:
+      - "checker-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: checker/go.mod
+
+      - name: Build static binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: ./checker/build.sh
+
+      - name: Upload build artifacts
+        if: ${{ !startsWith(github.ref_name, 'checker-v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: checker-dist
+          path: checker/dist/*
+
+      - name: Publish release
+        if: ${{ startsWith(github.ref_name, 'checker-v') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" checker/dist/* --clobber
+          else
+            gh release create "$TAG" checker/dist/* --generate-notes
+          fi

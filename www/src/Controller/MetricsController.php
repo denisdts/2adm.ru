@@ -8,19 +8,26 @@ use App\Auth\ApiKeyGuard;
 use App\Http\Request;
 use App\Http\Response;
 use App\Monitor\MetricsService;
+use App\Repository\CheckerRepository;
+use App\Support\CheckerGuid;
 
 final class MetricsController
 {
     public function __construct(
         private readonly MetricsService $metrics,
         private readonly ApiKeyGuard $guard,
+        private readonly CheckerRepository $checkers,
     ) {
     }
 
     public function ingest(Request $request): Response
     {
         $key = $this->guard->require($request);
-        $accepted = $this->metrics->ingest($key, $request->json());
+
+        $guid = CheckerGuid::fromRequest($request);
+        $checkerId = $guid === null ? null : $this->checkers->touch($guid, $key->id);
+
+        $accepted = $this->metrics->ingest($key, $request->json(), $checkerId);
 
         return Response::json(['accepted' => $accepted], 202);
     }

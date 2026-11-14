@@ -54,3 +54,10 @@ services:
 volumes:
   mysql-data:
   vendor:
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.213.77.0/24

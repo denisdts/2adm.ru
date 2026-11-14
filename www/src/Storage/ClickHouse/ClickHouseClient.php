@@ -139,7 +139,6 @@ final class ClickHouseClient
         $response = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         $error = curl_error($handle);
-        curl_close($handle);
 
         if ($response === false) {
             throw new RuntimeException(sprintf('ClickHouse request failed: %s', $error !== '' ? $error : 'unknown error'));

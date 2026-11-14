@@ -6,19 +6,31 @@ namespace App;
 
 use App\Auth\ApiKeyAuthenticator;
 use App\Auth\ApiKeyGuard;
+use App\Auth\UserAuthenticator;
 use App\Config\Config;
+use App\Controller\AdminController;
+use App\Controller\AdminPageController;
+use App\Controller\AuthController;
+use App\Controller\CheckerController;
+use App\Controller\DashController;
 use App\Controller\DashboardController;
 use App\Controller\HealthController;
 use App\Controller\MetricsController;
 use App\Controller\ServiceController;
+use App\Controller\SiteController;
+use App\Controller\SitePageController;
 use App\Exception\ApiException;
 use App\Http\Request;
 use App\Http\Response;
 use App\Http\Router;
 use App\Monitor\MetricsService;
+use App\Repository\AdminRepository;
 use App\Repository\ApiKeyRepository;
+use App\Repository\CheckerRepository;
 use App\Repository\MetricsRepository;
 use App\Repository\ServiceRepository;
+use App\Repository\UserRepository;
+use App\Repository\UserSessionRepository;
 use App\Storage\ClickHouse\ClickHouseClient;
 use App\Storage\MySql\MySqlConnection;
 use App\Storage\Redis\RedisClient;
@@ -48,23 +60,92 @@ final class Application
 
         $keys = new ApiKeyRepository($mysql);
         $services = new ServiceRepository($mysql);
+        $users = new UserRepository($mysql);
+        $userSessions = new UserSessionRepository($mysql);
+        $adminRepository = new AdminRepository($mysql);
+        $checkerRepository = new CheckerRepository($mysql);
 
         $authenticator = new ApiKeyAuthenticator($this->config, $keys, $redis);
         $guard = new ApiKeyGuard($authenticator, $redis, $this->config);
+        $userAuthenticator = new UserAuthenticator($this->config, $users, $userSessions, $redis);
 
-        $metrics = new MetricsService(new MetricsRepository($clickhouse), $redis, $this->config);
+        $metricsRepository = new MetricsRepository($clickhouse);
+        $metrics = new MetricsService($metricsRepository, $redis, $this->config);
 
         $health = new HealthController($mysql, $clickhouse, $redis);
         $dashboard = new DashboardController();
-        $metricsController = new MetricsController($metrics, $guard);
-        $serviceController = new ServiceController($services, $guard);
+        $dash = new DashController();
+        $sitePage = new SitePageController();
+        $adminPage = new AdminPageController();
+        $authController = new AuthController($userAuthenticator);
+        $adminController = new AdminController($userAuthenticator, $adminRepository, $users);
+        $checkerController = new CheckerController($guard, $checkerRepository);
+        $metricsController = new MetricsController($metrics, $guard, $checkerRepository);
+        $serviceController = new ServiceController($services, $guard, $checkerRepository);
+        $siteController = new SiteController($services, $userAuthenticator, $metricsRepository);
 
         $router = $this->router;
 
         $router->get('/', static fn (Request $request): Response => $dashboard->index());
+        $router->get('/dash', static fn (Request $request): Response => $dash->index());
+        $router->get(
+            '/dash/site/{slug}',
+            static fn (Request $request, array $params): Response => $sitePage->index($request, $params),
+        );
+        $router->get('/admin', static fn (Request $request): Response => $adminPage->index($request));
         $router->get('/healthz', static fn (Request $request): Response => $health->live());
         $router->get('/api/v1/health', static fn (Request $request): Response => $health->ready());
         $router->get('/api/v1/services', static fn (Request $request): Response => $serviceController->index($request));
+
+        // sites of the authenticated user's company
+        $router->get('/api/v1/sites', static fn (Request $request): Response => $siteController->index($request));
+        $router->post('/api/v1/sites', static fn (Request $request): Response => $siteController->create($request));
+        $router->put(
+            '/api/v1/sites/{slug}/metadata',
+            static fn (Request $request, array $params): Response => $serviceController->updateMetadata($request, $params),
+        );
+        $router->get(
+            '/api/v1/sites/{slug}/history',
+            static fn (Request $request, array $params): Response => $siteController->history($request, $params),
+        );
+        $router->get(
+            '/api/v1/sites/{slug}',
+            static fn (Request $request, array $params): Response => $siteController->show($request, $params),
+        );
+
+        $router->post(
+            '/api/v1/checkers/heartbeat',
+            static fn (Request $request): Response => $checkerController->heartbeat($request),
+        );
+
+        $router->get('/api/v1/admin/users', static fn (Request $request): Response => $adminController->users($request));
+        $router->get(
+            '/api/v1/admin/companies',
+            static fn (Request $request): Response => $adminController->companies($request),
+        );
+        $router->get('/api/v1/admin/sites', static fn (Request $request): Response => $adminController->sites($request));
+        $router->get(
+            '/api/v1/admin/checkers',
+            static fn (Request $request): Response => $adminController->checkers($request),
+        );
+        $router->post(
+            '/api/v1/admin/checkers',
+            static fn (Request $request): Response => $adminController->createChecker($request),
+        );
+        $router->get(
+            '/api/v1/admin/notifications',
+            static fn (Request $request): Response => $adminController->notifications($request),
+        );
+        $router->post(
+            '/api/v1/admin/administrators',
+            static fn (Request $request): Response => $adminController->createAdministrator($request),
+        );
+
+        // dashboard auth
+        $router->post('/api/v1/auth/login', static fn (Request $request): Response => $authController->login($request));
+        $router->post('/api/v1/auth/register', static fn (Request $request): Response => $authController->register($request));
+        $router->get('/api/v1/auth/me', static fn (Request $request): Response => $authController->me($request));
+        $router->post('/api/v1/auth/logout', static fn (Request $request): Response => $authController->logout($request));
 
         // ingestion
         $router->post('/api/v1/metrics', static fn (Request $request): Response => $metricsController->ingest($request));
