@@ -43,6 +43,7 @@ final class Config
                 'database' => Env::get('DB_DATABASE', 'monitoring'),
                 'username' => Env::get('DB_USERNAME', 'monitoring'),
                 'password' => Env::get('DB_PASSWORD', ''),
+                'timezone' => Env::get('DB_TIMEZONE', '+00:00'),
             ],
             'clickhouse' => [
                 'host' => Env::get('CLICKHOUSE_HOST', 'clickhouse'),

@@ -43,6 +43,9 @@ final class MySqlConnection
             ],
         );
 
+        $timezone = (string) ($this->config['timezone'] ?? '+00:00');
+        $this->pdo->exec('SET time_zone = ' . $this->pdo->quote($timezone));
+
         return $this->pdo;
     }
 

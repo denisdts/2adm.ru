@@ -32,6 +32,7 @@ services:
       DB_DATABASE: ${DB_DATABASE:-monitoring}
       DB_USERNAME: ${DB_USERNAME:-monitoring}
       DB_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be set in production}"
+      DB_TIMEZONE: ${DB_TIMEZONE:-+00:00}
       # --- ClickHouse (embedded by default, external via CLICKHOUSE_HOST) ---
       CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:-clickhouse}
       CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-8123}
